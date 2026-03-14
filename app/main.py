@@ -34,6 +34,7 @@ from app.schemas import (
     RegisterRequest,
     LoginRequest,
     TelegramAuthRequest,
+    TelegramIdAuthRequest,
     BotOnStartRequest,
     UserResponse,
     UserMatrixResponse,
@@ -122,6 +123,21 @@ def _ensure_root_user(db: Session) -> None:
     db.commit()
 
 
+def _ensure_min_balance_500(db: Session) -> None:
+    """
+    Для всех уже существующих пользователей (кроме системного) гарантируем баланс не меньше 500$.
+    Используется один раз на запуске, чтобы «нарисовать» 500$ пользователям.
+    """
+    q = db.query(User).filter(User.id != SYSTEM_USER_ID, User.balance < 500.0)
+    updated = 0
+    for u in q:
+        u.balance = 500.0
+        updated += 1
+    if updated:
+        db.commit()
+        print(f"[startup] boosted balance to 500$ for {updated} users")
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
@@ -154,6 +170,7 @@ def startup():
     try:
         _ensure_system_user(db)
         _ensure_root_user(db)
+        _ensure_min_balance_500(db)
     finally:
         db.close()
 
@@ -278,6 +295,21 @@ def auth_telegram(data: TelegramAuthRequest, db: Session = Depends(get_db)):
     return {"access_token": token, "token_type": "bearer", "user": UserResponse.model_validate(user)}
 
 
+@app.post("/api/auth/telegram-id")
+def auth_telegram_id(data: TelegramIdAuthRequest, db: Session = Depends(get_db)):
+    """
+    Авторизация по telegram_id из URL (?tg_id=...).
+    Пользователь должен быть заранее записан ботом (через /start); новых пользователей здесь не создаём.
+    """
+    user = services.get_user_by_telegram_id(db, data.telegram_id)
+    if not user:
+        raise HTTPException(403, "User not registered via bot")
+    if not user.is_active:
+        raise HTTPException(403, "Account disabled")
+    token = create_access_token(str(user.id))
+    return {"access_token": token, "token_type": "bearer", "user": UserResponse.model_validate(user)}
+
+
 @app.post("/api/bot/on-start")
 def bot_on_start(
     data: BotOnStartRequest,
@@ -319,16 +351,22 @@ def bot_on_start(
 
 
 @app.get("/api/auth/me")
-def auth_me(current_user: User = Depends(get_current_user)):
-    """Текущий пользователь, реферальная ссылка (диплинк в бота) и кошелёк для пополнения."""
+def auth_me(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Текущий пользователь, реферальная ссылка (диплинк в бота), кто пригласил и кошелёк для пополнения."""
     if current_user.telegram_id is not None:
         ref_link = f"https://t.me/{TELEGRAM_BOT_USERNAME}?start={current_user.telegram_id}"
     else:
         ref_link = f"https://t.me/{TELEGRAM_BOT_USERNAME}?start=ref_{current_user.referral_code}" if current_user.referral_code else None
+    referrer_username = None
+    if current_user.referrer_id:
+        referrer = db.query(User).filter(User.id == current_user.referrer_id).first()
+        if referrer:
+            referrer_username = referrer.username
     return {
         "user": UserResponse.model_validate(current_user),
         "referral_link": ref_link,
         "referral_code": current_user.referral_code,
+        "referrer_username": referrer_username,
         "usdt_wallet_trc20": USDT_WALLET_TRC20,
         "is_root": current_user.username == ROOT_USERNAME,
     }

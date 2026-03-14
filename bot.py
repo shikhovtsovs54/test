@@ -38,12 +38,17 @@ WELCOME = (
 )
 
 
-def build_webapp_url(ref: str | None) -> str:
-    """URL веб-приложения; ref — telegram_id реферера из диплинка ?start=ref."""
+def build_webapp_url(telegram_id: int | None, ref: str | None) -> str:
+    """URL веб-приложения; tg_id и ref — параметры в query (?tg_id=...&ref=...)."""
     base = (WEBAPP_BASE_URL or "https://your-domain.com").rstrip("/")
-    if ref and ref.strip():
-        return f"{base}?ref={ref.strip()}"
-    return base
+    params = []
+    if telegram_id is not None:
+        params.append(f"tg_id={telegram_id}")
+    if ref and str(ref).strip():
+        params.append(f"ref={str(ref).strip()}")
+    if not params:
+        return base
+    return base + "?" + "&".join(params)
 
 
 def _parse_referrer_telegram_id(start_param: str | None) -> int | None:
@@ -115,9 +120,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 print(f"[bot] /start — исключение: {e}")
                 traceback.print_exc()
 
-    url = build_webapp_url(start_param)
+    url = build_webapp_url(telegram_id, start_param)
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Открыть веб-приложение", web_app=WebAppInfo(url=url))],
+        [InlineKeyboardButton("Открыть веб-приложение", url=url)],
     ])
     await update.message.reply_text(WELCOME, reply_markup=keyboard)
 

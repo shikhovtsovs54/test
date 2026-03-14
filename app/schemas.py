@@ -25,6 +25,11 @@ class TelegramAuthRequest(BaseModel):
     referrer_telegram_id: Optional[int] = None  # из диплинка ?start=ref_tg_id
 
 
+class TelegramIdAuthRequest(BaseModel):
+    """Авторизация по telegram_id (из URL ?tg_id=...). Пользователь должен быть заранее создан ботом."""
+    telegram_id: int
+
+
 class BotOnStartRequest(BaseModel):
     """Данные, которые бот передаёт при /start (update.message.from_user + start_param)."""
     telegram_id: int

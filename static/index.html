@@ -103,17 +103,8 @@
     .header-left { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
     .header h1 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
     .header .balance { font-size: 1.125rem; font-weight: 600; color: var(--green); padding: 0.35rem 0.75rem; background: var(--green-dim); border-radius: var(--radius-sm); }
-    .btn-logout {
-      padding: 0.5rem 1rem;
-      background: var(--surface-hover);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-sm);
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 0.9rem;
-      font-weight: 500;
-    }
-    .btn-logout:hover { color: var(--text); border-color: var(--border-focus); }
+    .invited-by-block { margin-top: 0.5rem; }
+    .invited-by-text { margin: 0; font-size: 0.95rem; color: var(--muted); }
 
     .card {
       background: var(--surface);
@@ -252,8 +243,10 @@
         <h1 id="header-username">—</h1>
         <span class="balance">Баланс: $<span id="header-balance">0.00</span></span>
       </div>
-      <button type="button" class="btn-logout" id="btn-logout">Выйти</button>
     </header>
+    <div id="invited-by-block" class="card invited-by-block" style="display: none;">
+      <p class="invited-by-text">Вас пригласил: <strong id="referrer-username">—</strong></p>
+    </div>
 
     <div class="card">
       <h2>Покупка матриц</h2>
@@ -400,11 +393,36 @@
       var num = parseInt(ref, 10);
       return isNaN(num) ? null : num;
     }
+    function getTelegramIdFromUrl() {
+      var params = new URLSearchParams(window.location.search);
+      var v = params.get('tg_id');
+      if (!v) return null;
+      var num = parseInt(v, 10);
+      return isNaN(num) ? null : num;
+    }
     function getInitDataFromUrl() {
       var hash = window.location.hash.slice(1);
       if (!hash) return null;
       var params = new URLSearchParams(hash);
       return params.get('tgWebAppData');
+    }
+    async function tryTelegramIdAuth() {
+      var tgId = getTelegramIdFromUrl();
+      if (!tgId) return false;
+      try {
+        var res = await fetch(API + '/auth/telegram-id', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ telegram_id: tgId })
+        });
+        if (!res.ok) return false;
+        var data = await res.json();
+        if (data.access_token) {
+          setToken(data.access_token);
+          return true;
+        }
+      } catch (e) {}
+      return false;
     }
     async function tryTelegramAuth() {
       var tg = window.Telegram && window.Telegram.WebApp;
@@ -510,6 +528,14 @@
       document.getElementById('header-username').textContent = u.username;
       document.getElementById('header-balance').textContent = Number(u.balance).toFixed(2);
       document.getElementById('withdrawal-available').textContent = Number(u.balance).toFixed(2);
+      var invitedBy = document.getElementById('invited-by-block');
+      var refNameEl = document.getElementById('referrer-username');
+      if (meData.referrer_username) {
+        refNameEl.textContent = meData.referrer_username;
+        invitedBy.style.display = 'block';
+      } else {
+        invitedBy.style.display = 'none';
+      }
       document.getElementById('ref-link').value = meData.referral_link || (meData.referral_code ? (window.location.origin + '/?ref=' + meData.referral_code) : '');
       document.getElementById('usdt-wallet').innerHTML = '<strong>' + (meData.usdt_wallet_trc20 || '—') + '</strong>';
       if (meData.is_root) document.getElementById('root-add-funds').style.display = 'block';
@@ -696,8 +722,6 @@
       } catch (e) { alert(e.message); }
     };
 
-    document.getElementById('btn-logout').onclick = function() { setToken(null); showAuthRequired(); };
-
     (async function init() {
       if (getToken()) {
         try {
@@ -709,6 +733,13 @@
           setToken(null);
         }
       }
+      // 1) Попытка авторизации по tg_id из URL (кнопка в инлайн-клавиатуре)
+      if (await tryTelegramIdAuth()) {
+        showDashboard();
+        loadMe();
+        return;
+      }
+      // 2) Если нет tg_id, пробуем Telegram WebApp initData (кнопка WebApp/меню)
       if (await tryTelegramAuth()) {
         showDashboard();
         loadMe();
