@@ -67,6 +67,7 @@ USDT_WALLET_TRC20 = os.environ.get("USDT_WALLET_TRC20", "TYourTRC20WalletAddress
 # Telegram Bot (для проверки initData и диплинков)
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "YourBot")  # без @, для ссылки t.me/BotUsername
+BOT_ON_START_SECRET = os.environ.get("BOT_ON_START_SECRET", "")  # секрет для вызова /api/bot/on-start (бот передаёт в заголовке)
 # На Render подставляется автоматически (RENDER_EXTERNAL_URL)
 WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or "https://your-domain.com"
 

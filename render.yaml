@@ -9,7 +9,10 @@ services:
         sync: false
       - key: TELEGRAM_BOT_USERNAME
         sync: false
+      - key: BOT_ON_START_SECRET
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: USDT_WALLET_TRC20
         sync: false
+      # WEBAPP_BASE_URL задай вручную (URL сервиса) или используй RENDER_EXTERNAL_URL — в коде он подставляется, если WEBAPP_BASE_URL пустой

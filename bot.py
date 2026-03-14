@@ -1,7 +1,8 @@
 """
 Telegram-бот проекта MATRIX.
+При /start берём telegram_id пользователя и записываем в БД через /api/bot/on-start.
 Приветственное сообщение и кнопка перехода в веб-приложение.
-Диплинк: t.me/BotUsername?start=TELEGRAM_ID — реферер; при открытии веб-приложения передаётся ref=TELEGRAM_ID.
+Диплинк: t.me/BotUsername?start=TELEGRAM_ID — реферер.
 """
 
 import os
@@ -15,10 +16,11 @@ try:
 except ImportError:
     pass
 
+import httpx
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, WEBAPP_BASE_URL
+from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, WEBAPP_BASE_URL, BOT_ON_START_SECRET
 
 WELCOME = (
     "Вас приветствует проект MATRIX.\n\n"
@@ -34,11 +36,47 @@ def build_webapp_url(ref: str | None) -> str:
     return base
 
 
+def _parse_referrer_telegram_id(start_param: str | None) -> int | None:
+    """Из start_param (t.me/Bot?start=12345) извлекаем telegram_id реферера."""
+    if not start_param or not start_param.strip():
+        return None
+    s = start_param.strip()
+    if not s.isdigit():
+        return None
+    return int(s)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message:
+    if not update.message or not update.message.from_user:
         return
+    from_user = update.message.from_user
+    telegram_id = from_user.id
     # При переходе по t.me/Bot?start=12345 в context.args будет ["12345"] — telegram_id реферера
     start_param = context.args[0] if context.args else None
+    referrer_telegram_id = _parse_referrer_telegram_id(start_param)
+
+    # Сразу записываем пользователя в БД (или пропускаем, если уже есть)
+    base_url = (WEBAPP_BASE_URL or "").rstrip("/")
+    if base_url and BOT_ON_START_SECRET:
+        payload = {
+            "telegram_id": telegram_id,
+            "username": from_user.username,
+            "first_name": from_user.first_name,
+            "last_name": from_user.last_name,
+            "referrer_telegram_id": referrer_telegram_id,
+        }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                r = await client.post(
+                    f"{base_url}/api/bot/on-start",
+                    json=payload,
+                    headers={"X-Bot-Secret": BOT_ON_START_SECRET},
+                )
+                r.raise_for_status()
+        except Exception as e:
+            # Логируем, но не мешаем показать кнопку — пользователь уже может быть в БД
+            print(f"[bot] on-start error: {e}")
+
     url = build_webapp_url(start_param)
     keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("Открыть веб-приложение", web_app=WebAppInfo(url=url))],

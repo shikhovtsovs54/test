@@ -25,6 +25,15 @@ class TelegramAuthRequest(BaseModel):
     referrer_telegram_id: Optional[int] = None  # из диплинка ?start=ref_tg_id
 
 
+class BotOnStartRequest(BaseModel):
+    """Данные, которые бот передаёт при /start (update.message.from_user + start_param)."""
+    telegram_id: int
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    referrer_telegram_id: Optional[int] = None  # из start_param диплинка
+
+
 class UserResponse(BaseModel):
     id: int
     username: str

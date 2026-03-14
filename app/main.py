@@ -5,7 +5,7 @@ FastAPI приложение: симуляция матричного марке
 
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -24,6 +24,7 @@ from app.config import (
     USDT_WALLET_TRC20,
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_BOT_USERNAME,
+    BOT_ON_START_SECRET,
 )
 from app.auth import verify_password, create_access_token, decode_access_token, hash_password
 from app.telegram_webapp import get_telegram_user
@@ -32,6 +33,7 @@ from app.schemas import (
     RegisterRequest,
     LoginRequest,
     TelegramAuthRequest,
+    BotOnStartRequest,
     UserResponse,
     UserMatrixResponse,
     MatrixDetailResponse,
@@ -251,6 +253,30 @@ def auth_telegram(data: TelegramAuthRequest, db: Session = Depends(get_db)):
     )
     token = create_access_token(str(user.id))
     return {"access_token": token, "token_type": "bearer", "user": UserResponse.model_validate(user)}
+
+
+@app.post("/api/bot/on-start")
+def bot_on_start(
+    data: BotOnStartRequest,
+    db: Session = Depends(get_db),
+    x_bot_secret: str | None = Header(None, alias="X-Bot-Secret"),
+):
+    """
+    Вызывается ботом при /start: записываем пользователя в БД по telegram_id.
+    Если такой telegram_id уже есть — ничего не делаем, просто пропускаем.
+    При открытии веб-приложения пользователь авторизуется по initData (telegram_id уже в БД).
+    """
+    if not BOT_ON_START_SECRET or x_bot_secret != BOT_ON_START_SECRET:
+        raise HTTPException(401, "Invalid or missing X-Bot-Secret")
+    _ensure_system_user(db)
+    username_from_tg = (data.username or "").strip() or None
+    services.ensure_telegram_user(
+        db,
+        telegram_id=data.telegram_id,
+        username_from_tg=username_from_tg,
+        referrer_telegram_id=data.referrer_telegram_id,
+    )
+    return {"ok": True}
 
 
 @app.get("/api/auth/me")

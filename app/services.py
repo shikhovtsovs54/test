@@ -340,6 +340,29 @@ def create_telegram_user(
     return user
 
 
+def ensure_telegram_user(
+    db: Session,
+    telegram_id: int,
+    username_from_tg: Optional[str] = None,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    referrer_telegram_id: Optional[int] = None,
+) -> User:
+    """
+    Найти пользователя по telegram_id или создать. При /start бот вызывает это —
+    пользователь сразу оказывается в БД; при открытии веб-приложения ищем по telegram_id и открываем ЛК.
+    """
+    user = get_user_by_telegram_id(db, telegram_id)
+    if user:
+        return user
+    return create_telegram_user(
+        db,
+        telegram_id=telegram_id,
+        username_from_tg=username_from_tg,
+        referrer_telegram_id=referrer_telegram_id,
+    )
+
+
 # --- Регистрация ---
 
 def register_user(

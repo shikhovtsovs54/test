@@ -241,8 +241,8 @@
   <div id="auth-required-screen" class="login-wrap" style="display: none;">
     <div class="login-card">
       <h1>MATRIX</h1>
-      <p class="auth-required-msg">Для использования сервиса перейдите в бота в Telegram и откройте веб-приложение по кнопке.</p>
-      <p class="auth-required-support">Если вы уже открыли приложение из бота и видите это сообщение — обратитесь в поддержку.</p>
+      <p class="auth-required-msg">Откройте бота в приложении Telegram и нажмите кнопку «Открыть веб-приложение» под сообщением бота.</p>
+      <p class="auth-required-support">Не копируйте ссылку в браузер — страница должна открыться внутри Telegram. Если открыли в Safari/Chrome — закройте вкладку и нажмите кнопку в боте снова.</p>
     </div>
   </div>
 
@@ -361,6 +361,13 @@
 
   <script src="config.js"></script>
   <script>
+    (function() {
+      var tw = window.Telegram && window.Telegram.WebApp;
+      if (tw) {
+        tw.ready();
+        tw.expand();
+      }
+    })();
     const API = (window.MATRIX_API_BASE || '') + '/api';
     const TOKEN_KEY = 'matrix_token';
     const MIN_WITHDRAWAL = 10;
@@ -393,9 +400,23 @@
       var num = parseInt(ref, 10);
       return isNaN(num) ? null : num;
     }
+    function getInitDataFromUrl() {
+      var hash = window.location.hash.slice(1);
+      if (!hash) return null;
+      var params = new URLSearchParams(hash);
+      return params.get('tgWebAppData');
+    }
     async function tryTelegramAuth() {
       var tg = window.Telegram && window.Telegram.WebApp;
-      var initData = tg && tg.initData;
+      var initData = (tg && tg.initData) || getInitDataFromUrl();
+      if (!initData && tg) {
+        for (var i = 0; i < 10; i++) {
+          await new Promise(function(r) { setTimeout(r, 400); });
+          initData = tg.initData || getInitDataFromUrl();
+          if (initData) break;
+        }
+      }
+      if (!initData) initData = getInitDataFromUrl();
       if (!initData) return false;
       var ref = getRefFromUrl();
       try {
@@ -692,6 +713,10 @@
         showDashboard();
         loadMe();
         return;
+      }
+      if (window.Telegram && window.Telegram.WebApp && !window.Telegram.WebApp.initData) {
+        document.querySelector('.auth-required-support').textContent =
+          'Telegram не передал данные. Закройте это окно, снова нажмите кнопку в боте. Или обновите приложение Telegram до последней версии.';
       }
       showAuthRequired();
     })();
