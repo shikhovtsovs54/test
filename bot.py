@@ -1,7 +1,8 @@
 """
 Telegram-бот проекта MATRIX.
-При /start берём telegram_id пользователя и записываем в БД через /api/bot/on-start.
-Приветственное сообщение и кнопка перехода в веб-приложение.
+При /start берём telegram_id пользователя и записываем в БД.
+Режимы: 1) Вместе с бэкендом (на Railway) — запись в БД напрямую, без HTTP.
+        2) Отдельно с ПК — запись через POST /api/bot/on-start.
 Диплинк: t.me/BotUsername?start=TELEGRAM_ID — реферер.
 """
 
@@ -21,6 +22,15 @@ from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMar
 from telegram.ext import Application, CommandHandler, ContextTypes
 
 from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, WEBAPP_BASE_URL, BOT_ON_START_SECRET
+
+# Если задан — при /start пишем в БД напрямую (бот запущен вместе с бэкендом на Railway)
+_on_start_db_callback = None
+
+
+def set_on_start_db_callback(callback):
+    """Вызвать из main.py при старте приложения: запись пользователя в БД без HTTP."""
+    global _on_start_db_callback
+    _on_start_db_callback = callback
 
 WELCOME = (
     "Вас приветствует проект MATRIX.\n\n"
@@ -58,37 +68,52 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     print(f"[bot] /start — telegram_id={telegram_id} username={getattr(from_user, 'username', None)} first_name={getattr(from_user, 'first_name', None)} referrer_telegram_id={referrer_telegram_id}")
 
-    # Сразу записываем пользователя в БД (или пропускаем, если уже есть)
-    base_url = (WEBAPP_BASE_URL or "").rstrip("/")
-    if not base_url or "your-domain" in base_url:
-        print("[bot] /start — WEBAPP_BASE_URL не задан или заглушка, запись в БД пропущена")
-    elif not BOT_ON_START_SECRET:
-        print("[bot] /start — BOT_ON_START_SECRET не задан, запись в БД пропущена")
-    else:
-        payload = {
-            "telegram_id": telegram_id,
-            "username": from_user.username,
-            "first_name": from_user.first_name,
-            "last_name": from_user.last_name,
-            "referrer_telegram_id": referrer_telegram_id,
-            "bot_secret": BOT_ON_START_SECRET,  # и в теле — если прокси режет заголовок
-        }
-        print(f"[bot] /start — отправляю в БД: telegram_id={telegram_id} username={payload.get('username')}")
+    # Запись в БД: напрямую (бот на Railway) или через HTTP (бот на ПК)
+    if _on_start_db_callback:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                r = await client.post(
-                    f"{base_url}/api/bot/on-start",
-                    json=payload,
-                    headers={"X-Bot-Secret": BOT_ON_START_SECRET},
-                )
-                r.raise_for_status()
-                print(f"[bot] /start — успех: пользователь записан в БД (ответ {r.status_code})")
-        except httpx.HTTPStatusError as e:
-            print(f"[bot] /start — ошибка HTTP: {e.response.status_code} body: {e.response.text}")
+            _on_start_db_callback(
+                telegram_id=telegram_id,
+                username=from_user.username,
+                first_name=from_user.first_name,
+                last_name=from_user.last_name,
+                referrer_telegram_id=referrer_telegram_id,
+            )
+            print(f"[bot] /start — успех: пользователь записан в БД (напрямую)")
         except Exception as e:
             import traceback
-            print(f"[bot] /start — исключение: {e}")
+            print(f"[bot] /start — ошибка записи в БД: {e}")
             traceback.print_exc()
+    else:
+        base_url = (WEBAPP_BASE_URL or "").rstrip("/")
+        if not base_url or "your-domain" in base_url:
+            print("[bot] /start — WEBAPP_BASE_URL не задан, запись в БД пропущена")
+        elif not BOT_ON_START_SECRET:
+            print("[bot] /start — BOT_ON_START_SECRET не задан, запись в БД пропущена")
+        else:
+            payload = {
+                "telegram_id": telegram_id,
+                "username": from_user.username,
+                "first_name": from_user.first_name,
+                "last_name": from_user.last_name,
+                "referrer_telegram_id": referrer_telegram_id,
+                "bot_secret": BOT_ON_START_SECRET,
+            }
+            print(f"[bot] /start — отправляю в БД по HTTP: telegram_id={telegram_id}")
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    r = await client.post(
+                        f"{base_url}/api/bot/on-start",
+                        json=payload,
+                        headers={"X-Bot-Secret": BOT_ON_START_SECRET},
+                    )
+                    r.raise_for_status()
+                    print(f"[bot] /start — успех: пользователь записан в БД (ответ {r.status_code})")
+            except httpx.HTTPStatusError as e:
+                print(f"[bot] /start — ошибка HTTP: {e.response.status_code} body: {e.response.text}")
+            except Exception as e:
+                import traceback
+                print(f"[bot] /start — исключение: {e}")
+                traceback.print_exc()
 
     url = build_webapp_url(start_param)
     keyboard = InlineKeyboardMarkup([
@@ -118,18 +143,31 @@ async def _on_startup(app: Application) -> None:
         print()
 
 
-def main() -> None:
-    if not TELEGRAM_BOT_TOKEN:
-        print("Укажите TELEGRAM_BOT_TOKEN в .env или переменных окружения.")
-        sys.exit(1)
-    app = (
+def build_app():
+    """Создать Application бота (для запуска отдельно или из main.py)."""
+    return (
         Application.builder()
         .token(TELEGRAM_BOT_TOKEN)
         .post_init(_on_startup)
         .build()
     )
+
+
+def run_bot() -> None:
+    """Запуск бота (polling). Вызывается из main() или из потока при старте FastAPI."""
+    if not TELEGRAM_BOT_TOKEN:
+        print("[bot] TELEGRAM_BOT_TOKEN не задан, бот не запущен.")
+        return
+    app = build_app()
     app.add_handler(CommandHandler("start", start))
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+def main() -> None:
+    if not TELEGRAM_BOT_TOKEN:
+        print("Укажите TELEGRAM_BOT_TOKEN в .env или переменных окружения.")
+        sys.exit(1)
+    run_bot()
 
 
 if __name__ == "__main__":

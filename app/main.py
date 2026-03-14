@@ -3,6 +3,7 @@ FastAPI приложение: симуляция матричного марке
 90% в сеть, 10% проекту. Авторизация, личный кабинет, реферальные ссылки.
 """
 
+import threading
 from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, Header
@@ -155,6 +156,26 @@ def startup():
         _ensure_root_user(db)
     finally:
         db.close()
+
+    # Запуск бота в том же процессе (на Railway): при /start запись в БД напрямую, без HTTP
+    if TELEGRAM_BOT_TOKEN:
+        import bot
+        def _bot_on_start(telegram_id, username, first_name, last_name, referrer_telegram_id):
+            db_session = SessionLocal()
+            try:
+                _ensure_system_user(db_session)
+                services.ensure_telegram_user(
+                    db_session,
+                    telegram_id=telegram_id,
+                    username_from_tg=username,
+                    referrer_telegram_id=referrer_telegram_id,
+                )
+            finally:
+                db_session.close()
+        bot.set_on_start_db_callback(_bot_on_start)
+        t = threading.Thread(target=bot.run_bot, daemon=True)
+        t.start()
+        print("[startup] Telegram bot started (same process, DB write on /start)")
 
 
 @app.get("/")
