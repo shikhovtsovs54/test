@@ -18,7 +18,7 @@ except ImportError:
     pass
 
 import httpx
-from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import Conflict
 
@@ -35,7 +35,7 @@ def set_on_start_db_callback(callback):
 
 WELCOME = (
     "Вас приветствует проект MATRIX.\n\n"
-    "Для использования сервиса перейдите в наше веб-приложение по кнопке ниже."
+    "Рады видеть вас в нашем сервисе. Откройте веб-приложение через меню бота (кнопка слева от поля ввода)."
 )
 
 
@@ -121,11 +121,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 print(f"[bot] /start — исключение: {e}")
                 traceback.print_exc()
 
-    url = build_webapp_url(telegram_id, start_param)
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Открыть веб-приложение", url=url)],
-    ])
-    await update.message.reply_text(WELCOME, reply_markup=keyboard)
+    await update.message.reply_text(WELCOME)
 
 
 async def _on_startup(app: Application) -> None:
