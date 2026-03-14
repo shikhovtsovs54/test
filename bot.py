@@ -20,6 +20,7 @@ except ImportError:
 import httpx
 from telegram import Update, WebAppInfo, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.error import Conflict
 
 from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, WEBAPP_BASE_URL, BOT_ON_START_SECRET
 
@@ -134,6 +135,8 @@ async def _on_startup(app: Application) -> None:
         print("Бот запущен: t.me/" + username)
         if not TELEGRAM_BOT_USERNAME or TELEGRAM_BOT_USERNAME == "YourBot":
             print("  Добавьте в .env: TELEGRAM_BOT_USERNAME=" + username)
+    base = (WEBAPP_BASE_URL or "").strip()
+    print("[bot] Кнопка ведёт на: " + (base or "(не задан WEBAPP_BASE_URL)"))
     if not BOT_ON_START_SECRET:
         print()
         print("  [!] BOT_ON_START_SECRET не задан — пользователи НЕ записываются в БД, в ЛК не пустит.")
@@ -158,6 +161,14 @@ def build_app():
     )
 
 
+async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Логируем ошибки; Conflict — когда бот запущен в двух местах (Railway + ПК)."""
+    if isinstance(context.error, Conflict):
+        print("[bot] Conflict: бот уже запущен в другом месте (например на Railway). Остановите второй экземпляр (локальный python3 bot.py или другой деплой).")
+        return
+    print(f"[bot] Ошибка: {context.error}")
+
+
 def run_bot() -> None:
     """Запуск бота (polling). Вызывается из main() или из потока при старте FastAPI."""
     if not TELEGRAM_BOT_TOKEN:
@@ -165,6 +176,7 @@ def run_bot() -> None:
         return
     app = build_app()
     app.add_handler(CommandHandler("start", start))
+    app.add_error_handler(_error_handler)
     # В отдельном потоке нельзя трогать сигнал-обработчики, поэтому отключаем stop_signals
     app.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=None)
 

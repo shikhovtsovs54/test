@@ -298,12 +298,21 @@ def auth_telegram(data: TelegramAuthRequest, db: Session = Depends(get_db)):
 @app.post("/api/auth/telegram-id")
 def auth_telegram_id(data: TelegramIdAuthRequest, db: Session = Depends(get_db)):
     """
-    Авторизация по telegram_id из URL (?tg_id=...).
-    Пользователь должен быть заранее записан ботом (через /start); новых пользователей здесь не создаём.
+    Авторизация по telegram_id из URL (?tg_id=...&ref=...).
+    Если пользователь уже есть в БД — выдаём JWT. Если нет — создаём (как при /start): telegram_id,
+    referrer по ref, проверка на самозапись; затем выдаём JWT.
     """
+    _ensure_system_user(db)
     user = services.get_user_by_telegram_id(db, data.telegram_id)
     if not user:
-        raise HTTPException(403, "User not registered via bot")
+        # Пользователь открыл ссылку, но не нажимал /start — создаём с теми данными, что есть (tg_id + ref)
+        user = services.ensure_telegram_user(
+            db,
+            telegram_id=data.telegram_id,
+            username_from_tg=None,
+            referrer_telegram_id=data.referrer_telegram_id,
+        )
+        print(f"[api] /api/auth/telegram-id — создан пользователь telegram_id={data.telegram_id} user_id={user.id}")
     if not user.is_active:
         raise HTTPException(403, "Account disabled")
     token = create_access_token(str(user.id))

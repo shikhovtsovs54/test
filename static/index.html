@@ -409,11 +409,14 @@
     async function tryTelegramIdAuth() {
       var tgId = getTelegramIdFromUrl();
       if (!tgId) return false;
+      var ref = getRefFromUrl();
+      var body = { telegram_id: tgId };
+      if (ref != null) body.referrer_telegram_id = ref;
       try {
         var res = await fetch(API + '/auth/telegram-id', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ telegram_id: tgId })
+          body: JSON.stringify(body)
         });
         if (!res.ok) return false;
         var data = await res.json();

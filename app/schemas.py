@@ -26,8 +26,9 @@ class TelegramAuthRequest(BaseModel):
 
 
 class TelegramIdAuthRequest(BaseModel):
-    """Авторизация по telegram_id (из URL ?tg_id=...). Пользователь должен быть заранее создан ботом."""
+    """Авторизация по telegram_id из URL (?tg_id=...). Если пользователя нет — создаём с ref из URL."""
     telegram_id: int
+    referrer_telegram_id: Optional[int] = None  # из параметра ref в URL
 
 
 class BotOnStartRequest(BaseModel):
