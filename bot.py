@@ -160,7 +160,8 @@ def run_bot() -> None:
         return
     app = build_app()
     app.add_handler(CommandHandler("start", start))
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # В отдельном потоке нельзя трогать сигнал-обработчики, поэтому отключаем stop_signals
+    app.run_polling(allowed_updates=Update.ALL_TYPES, stop_signals=None)
 
 
 def main() -> None:
