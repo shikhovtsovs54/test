@@ -32,6 +32,7 @@ class BotOnStartRequest(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     referrer_telegram_id: Optional[int] = None  # из start_param диплинка
+    bot_secret: Optional[str] = None  # секрет можно передать в теле (если заголовок обрезается)
 
 
 class UserResponse(BaseModel):

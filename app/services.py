@@ -354,13 +354,16 @@ def ensure_telegram_user(
     """
     user = get_user_by_telegram_id(db, telegram_id)
     if user:
+        print(f"[services] ensure_telegram_user: telegram_id={telegram_id} — уже в БД user_id={user.id}")
         return user
-    return create_telegram_user(
+    user = create_telegram_user(
         db,
         telegram_id=telegram_id,
         username_from_tg=username_from_tg,
         referrer_telegram_id=referrer_telegram_id,
     )
+    print(f"[services] ensure_telegram_user: telegram_id={telegram_id} — создан в БД user_id={user.id}")
+    return user
 
 
 # --- Регистрация ---

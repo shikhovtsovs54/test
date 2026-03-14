@@ -222,36 +222,31 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 def auth_telegram(data: TelegramAuthRequest, db: Session = Depends(get_db)):
     """
     Авторизация по Telegram Web App initData.
-    Если пользователь с telegram_id уже есть — возвращаем JWT (вход).
-    Если нет — создаём запись в БД (без матриц) и возвращаем JWT.
-    referrer_telegram_id — из диплинка ?start=ref_tg_id; сам на себя не регистрируем.
+    Пускаем только если пользователь уже есть в БД (записан при /start в боте).
+    Если telegram_id нет в БД — не создаём, не пускаем (403).
     """
+    print("[api] /api/auth/telegram — запрос (init_data длина:", len(data.init_data or ""), ")")
     if not TELEGRAM_BOT_TOKEN:
+        print("[api] /api/auth/telegram — 503: TELEGRAM_BOT_TOKEN не задан")
         raise HTTPException(503, "Telegram auth is not configured")
     tg_user = get_telegram_user(data.init_data, TELEGRAM_BOT_TOKEN)
     if not tg_user:
+        print("[api] /api/auth/telegram — 401: невалидный или просроченный initData")
         raise HTTPException(401, "Invalid or expired Telegram initData")
     telegram_id = tg_user.get("id")
     if not telegram_id:
+        print("[api] /api/auth/telegram — 401: в initData нет id пользователя")
         raise HTTPException(401, "Telegram user id missing")
-    username_from_tg = (tg_user.get("username") or "").strip() or None
-    if username_from_tg and not username_from_tg.startswith("@"):
-        pass  # уже без @
-    elif username_from_tg:
-        username_from_tg = username_from_tg.lstrip("@")
+    print(f"[api] /api/auth/telegram — из initData telegram_id={telegram_id}")
     user = services.get_user_by_telegram_id(db, telegram_id)
-    if user:
-        if not user.is_active:
-            raise HTTPException(403, "Account disabled")
-        token = create_access_token(str(user.id))
-        return {"access_token": token, "token_type": "bearer", "user": UserResponse.model_validate(user)}
-    user = services.create_telegram_user(
-        db,
-        telegram_id=telegram_id,
-        username_from_tg=username_from_tg,
-        referrer_telegram_id=data.referrer_telegram_id,
-    )
+    if not user:
+        print(f"[api] /api/auth/telegram — 403: пользователь telegram_id={telegram_id} не найден в БД (сначала нажми Start в боте)")
+        raise HTTPException(403, "User not registered. Open the app from the bot (press Start).")
+    if not user.is_active:
+        print(f"[api] /api/auth/telegram — 403: пользователь id={user.id} отключён")
+        raise HTTPException(403, "Account disabled")
     token = create_access_token(str(user.id))
+    print(f"[api] /api/auth/telegram — успех: user_id={user.id} telegram_id={telegram_id}")
     return {"access_token": token, "token_type": "bearer", "user": UserResponse.model_validate(user)}
 
 
@@ -266,16 +261,32 @@ def bot_on_start(
     Если такой telegram_id уже есть — ничего не делаем, просто пропускаем.
     При открытии веб-приложения пользователь авторизуется по initData (telegram_id уже в БД).
     """
-    if not BOT_ON_START_SECRET or x_bot_secret != BOT_ON_START_SECRET:
+    # Секрет принимаем из заголовка X-Bot-Secret или из тела bot_secret (если прокси режет заголовки)
+    secret_from_header = x_bot_secret
+    secret_from_body = getattr(data, "bot_secret", None) or (data.model_dump().get("bot_secret") if data else None)
+    received_secret = secret_from_header or secret_from_body
+    if not BOT_ON_START_SECRET:
+        print("[api] /api/bot/on-start — отказ: на сервере не задан BOT_ON_START_SECRET")
         raise HTTPException(401, "Invalid or missing X-Bot-Secret")
+    if not received_secret or received_secret != BOT_ON_START_SECRET:
+        print("[api] /api/bot/on-start — отказ: неверный или отсутствующий секрет (header=%s, body=%s)" % (bool(secret_from_header), bool(secret_from_body)))
+        raise HTTPException(401, "Invalid or missing X-Bot-Secret")
+    print(f"[api] /api/bot/on-start — получен telegram_id={data.telegram_id} username={data.username}")
     _ensure_system_user(db)
     username_from_tg = (data.username or "").strip() or None
-    services.ensure_telegram_user(
-        db,
-        telegram_id=data.telegram_id,
-        username_from_tg=username_from_tg,
-        referrer_telegram_id=data.referrer_telegram_id,
-    )
+    try:
+        user = services.ensure_telegram_user(
+            db,
+            telegram_id=data.telegram_id,
+            username_from_tg=username_from_tg,
+            referrer_telegram_id=data.referrer_telegram_id,
+        )
+        print(f"[api] /api/bot/on-start — успех: пользователь в БД id={user.id} telegram_id={user.telegram_id}")
+    except Exception as e:
+        import traceback
+        print(f"[api] /api/bot/on-start — исключение при записи в БД: {e}")
+        traceback.print_exc()
+        raise HTTPException(500, f"Database error: {e}")
     return {"ok": True}
 
 
