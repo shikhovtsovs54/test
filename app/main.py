@@ -534,6 +534,43 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
     db.refresh(invoice)
     order_id = str(invoice.id)
 
+    # При наличии API-ключей создаём счёт через API — тогда order_id гарантированно вернётся в postback.
+    # POS не передаёт order_id в postback (CryptoCloud присылает order_id: null), поэтому приоритет у API.
+    if use_api:
+        payload = {
+            "shop_id": CRYPTOCLOUD_SHOP_ID,
+            "amount": amount_usd,
+            "currency": "USD",
+            "order_id": order_id,
+        }
+        headers = {
+            "Authorization": f"Token {CRYPTOCLOUD_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        try:
+            resp = httpx.post(CRYPTOCLOUD_API_URL, json=payload, headers=headers, timeout=15.0)
+            body = resp.json() if resp.content else {}
+        except Exception as e:
+            print(f"[deposit] CryptoCloud API error: {e}")
+            raise HTTPException(502, "Ошибка платёжного провайдера")
+        if resp.status_code != 200 or body.get("status") != "success":
+            err = body.get("result") or body.get("error") or resp.text
+            print(f"[deposit] CryptoCloud create failed: {resp.status_code} {err}")
+            raise HTTPException(502, "Не удалось создать счёт на оплату")
+        result = body.get("result", {})
+        uuid_val = result.get("uuid") or ""
+        link = result.get("link") or ""
+        if not link and uuid_val:
+            link = f"https://pay.cryptocloud.plus/{uuid_val.replace('INV-', '')}"
+        invoice.invoice_uuid = uuid_val
+        db.commit()
+        return DepositCreateResponse(
+            invoice_id=invoice.id,
+            uuid=uuid_val,
+            link=link,
+            amount_usd=amount_usd,
+        )
+
     if use_pos:
         link = _build_pos_deposit_link(amount_usd, order_id, pos_link=CRYPTOCLOUD_POS_LINK)
         return DepositCreateResponse(
@@ -543,39 +580,7 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
             amount_usd=amount_usd,
         )
 
-    payload = {
-        "shop_id": CRYPTOCLOUD_SHOP_ID,
-        "amount": amount_usd,
-        "currency": "USD",
-        "order_id": order_id,
-    }
-    headers = {
-        "Authorization": f"Token {CRYPTOCLOUD_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    try:
-        resp = httpx.post(CRYPTOCLOUD_API_URL, json=payload, headers=headers, timeout=15.0)
-        body = resp.json() if resp.content else {}
-    except Exception as e:
-        print(f"[deposit] CryptoCloud API error: {e}")
-        raise HTTPException(502, "Ошибка платёжного провайдера")
-    if resp.status_code != 200 or body.get("status") != "success":
-        err = body.get("result") or body.get("error") or resp.text
-        print(f"[deposit] CryptoCloud create failed: {resp.status_code} {err}")
-        raise HTTPException(502, "Не удалось создать счёт на оплату")
-    result = body.get("result", {})
-    uuid_val = result.get("uuid") or ""
-    link = result.get("link") or ""
-    if not link and uuid_val:
-        link = f"https://pay.cryptocloud.plus/{uuid_val.replace('INV-', '')}"
-    invoice.invoice_uuid = uuid_val
-    db.commit()
-    return DepositCreateResponse(
-        invoice_id=invoice.id,
-        uuid=uuid_val,
-        link=link,
-        amount_usd=amount_usd,
-    )
+    raise HTTPException(503, "Пополнение не настроено")
 
 
 def _cryptocloud_verify_token(token: str | None) -> bool:
@@ -635,8 +640,10 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     Webhook от CryptoCloud после успешной оплаты.
     CryptoCloud вызывает этот URL методом POST (не GET). При открытии в браузере сработает GET и вернётся подсказка.
     """
+    print("[postback] POST request received from CryptoCloud")
     data = await _parse_postback_body(request)
     if not data:
+        print("[postback] empty or invalid body — check Content-Type and request format")
         raise HTTPException(400, "Invalid body")
     status = (data.get("status") or "").strip().lower() if isinstance(data.get("status"), str) else data.get("status")
     order_id = data.get("order_id")
@@ -674,23 +681,65 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     # Лог без токена для отладки (в Railway видно, что пришло)
     _log_data = {k: v for k, v in data.items() if k != "token"}
     print(f"[postback] received: status={status!r} order_id={order_id!r} keys={list(_log_data.keys())}")
+    # Для отладки: что именно пришло (без token). Если в логах нет этой строки — POST от CryptoCloud не доходит.
+    import json as _json
+    try:
+        _preview = _json.dumps(_log_data, ensure_ascii=False)[:500]
+        print(f"[postback] payload preview: {_preview}")
+    except Exception:
+        print(f"[postback] payload keys: {list(_log_data.keys())}")
     if CRYPTOCLOUD_SECRET and token and not _cryptocloud_verify_token(token):
         print("[postback] invalid token")
         raise HTTPException(401, "Invalid token")
+    # Если order_id не пришёл (типично для POS) — пробуем найти заявку по сумме и недавней дате
     if not order_id:
-        print("[postback] order_id missing — в настройках CryptoCloud проверьте, что при создании счёта передаётся order_id (наш id заявки)")
-        return {"ok": True, "message": "order_id missing, cannot credit"}
-    try:
-        if isinstance(order_id, str):
-            order_id = order_id.strip()
-        our_invoice_id = int(order_id) if not isinstance(order_id, int) else order_id
-    except (ValueError, TypeError):
-        print(f"[postback] order_id not int: {order_id!r}")
-        return {"ok": True, "message": "invalid order_id format"}
-    invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
-    if not invoice:
-        print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB")
-        return {"ok": True, "message": "invoice not found"}
+        amount_from_postback = None
+        if isinstance(data.get("invoice_info"), dict):
+            inv = data["invoice_info"]
+            amount_from_postback = inv.get("amount_usd") or inv.get("amount_in_fiat")
+        if amount_from_postback is None:
+            amount_from_postback = data.get("amount_crypto")
+        if amount_from_postback is not None:
+            try:
+                amount_f = float(amount_from_postback)
+            except (TypeError, ValueError):
+                amount_f = None
+            if amount_f and amount_f > 0:
+                from datetime import timedelta
+                since = datetime.utcnow() - timedelta(hours=24)
+                candidates = (
+                    db.query(DepositInvoice)
+                    .filter(
+                        DepositInvoice.status == "pending",
+                        DepositInvoice.amount_usd >= amount_f - 0.01,
+                        DepositInvoice.amount_usd <= amount_f + 0.01,
+                        DepositInvoice.created_at >= since,
+                    )
+                    .order_by(DepositInvoice.created_at.desc())
+                    .all()
+                )
+                if len(candidates) == 1:
+                    invoice = candidates[0]
+                    our_invoice_id = invoice.id
+                    order_id = our_invoice_id
+                    print(f"[postback] order_id was None, matched by amount={amount_f} to invoice id={our_invoice_id}")
+                else:
+                    print(f"[postback] order_id missing, amount={amount_f} matched {len(candidates)} invoices, need exactly one")
+        if not order_id:
+            print("[postback] order_id missing — укажите CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID для создания счетов через API (тогда order_id будет в postback)")
+            return {"ok": True, "message": "order_id missing, cannot credit"}
+    else:
+        try:
+            if isinstance(order_id, str):
+                order_id = order_id.strip()
+            our_invoice_id = int(order_id) if not isinstance(order_id, int) else order_id
+        except (ValueError, TypeError):
+            print(f"[postback] order_id not int: {order_id!r}")
+            return {"ok": True, "message": "invalid order_id format"}
+        invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
+        if not invoice:
+            print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB")
+            return {"ok": True, "message": "invoice not found"}
     print(f"[postback] found invoice id={invoice.id} user_id={invoice.user_id} amount_usd={invoice.amount_usd}")
     if invoice.status == "paid":
         return {"ok": True, "message": "Already processed"}
