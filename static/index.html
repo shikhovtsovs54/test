@@ -275,22 +275,17 @@
 
     <div id="deposit-card" class="card">
       <h2>Пополнение баланса</h2>
-      <div id="deposit-cryptocloud-form">
-        <p class="hint">Пополнение через CryptoCloud. Укажите сумму в USD (1–10 000). Будет создана ссылка на оплату криптовалютой (USDT, BTC, ETH и др.).</p>
-        <div class="add-funds-row">
-          <input type="number" id="deposit-amount" min="1" max="10000" step="0.01" value="50" placeholder="Сумма USD" />
-          <button type="button" class="btn" id="btn-deposit-create">Создать счёт на оплату</button>
-        </div>
-        <div id="deposit-link-box" style="display: none; margin-top: 0.75rem;">
-          <p class="hint">Счёт создан. Перейдите по ссылке и оплатите. После оплаты средства появятся на балансе автоматически.</p>
-          <a id="deposit-link" href="#" target="_blank" rel="noopener" class="usdt-box" style="display: inline-block; margin-top: 0.25rem; word-break: break-all;">—</a>
-          <div style="margin-top: 0.5rem;">
-            <button type="button" class="btn" id="btn-deposit-open">Открыть страницу оплаты</button>
-          </div>
-        </div>
+      <p class="hint">Пополнение через CryptoCloud. Укажите сумму в USD (1–10 000). Будет создана ссылка на оплату криптовалютой (USDT, BTC, ETH и др.).</p>
+      <div class="add-funds-row">
+        <input type="number" id="deposit-amount" min="1" max="10000" step="0.01" value="50" placeholder="Сумма USD" />
+        <button type="button" class="btn" id="btn-deposit-create">Создать счёт на оплату</button>
       </div>
-      <div id="deposit-unavailable" style="display: none;">
-        <p class="hint">Пополнение временно недоступно.</p>
+      <div id="deposit-link-box" style="display: none; margin-top: 0.75rem;">
+        <p class="hint">Счёт создан. Перейдите по ссылке и оплатите. После оплаты средства появятся на балансе автоматически.</p>
+        <a id="deposit-link" href="#" target="_blank" rel="noopener" class="usdt-box" style="display: inline-block; margin-top: 0.25rem; word-break: break-all;">—</a>
+        <div style="margin-top: 0.5rem;">
+          <button type="button" class="btn" id="btn-deposit-open">Открыть страницу оплаты</button>
+        </div>
       </div>
     </div>
 
@@ -555,8 +550,6 @@
         invitedBy.style.display = 'none';
       }
       document.getElementById('ref-link').value = meData.referral_link || (meData.referral_code ? (window.location.origin + '/?ref=' + meData.referral_code) : '');
-      document.getElementById('deposit-cryptocloud-form').style.display = meData.deposit_cryptocloud_enabled ? 'block' : 'none';
-      document.getElementById('deposit-unavailable').style.display = meData.deposit_cryptocloud_enabled ? 'none' : 'block';
       if (meData.is_root) document.getElementById('root-add-funds').style.display = 'block';
       document.getElementById('withdrawal-amount').max = Math.max(MIN_WITHDRAWAL, u.balance);
       updateWithdrawalUI();
