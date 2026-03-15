@@ -3,6 +3,7 @@ FastAPI приложение: симуляция матричного марке
 90% в сеть, 10% проекту. Авторизация, личный кабинет, реферальные ссылки.
 """
 
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -374,9 +375,9 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         "referrer_username": referrer_username,
         "usdt_wallet_trc20": USDT_WALLET_TRC20,
         "is_root": current_user.username == ROOT_USERNAME,
-        "deposit_cryptocloud_enabled": bool(CRYPTOCLOUD_POS_LINK or (CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)),
-        "cryptocloud_pos_link": (CRYPTOCLOUD_POS_LINK or "").strip() or None,
-        "cryptocloud_pos_id": _pos_id_from_link(CRYPTOCLOUD_POS_LINK),
+        "deposit_cryptocloud_enabled": bool(_resolve_pos_link() or (_env_get("CRYPTOCLOUD_API_KEY") or CRYPTOCLOUD_API_KEY) and (_env_get("CRYPTOCLOUD_SHOP_ID") or CRYPTOCLOUD_SHOP_ID)),
+        "cryptocloud_pos_link": ( _resolve_pos_link() or "" ).strip() or None,
+        "cryptocloud_pos_id": _pos_id_from_link(_resolve_pos_link()),
     }
 
 
@@ -496,6 +497,35 @@ def _build_pos_deposit_link(amount_usd: float, order_id: str, pos_link: str) -> 
 CRYPTOCLOUD_POS_ALLOWED_PREFIX = "https://pay.cryptocloud.plus/"
 
 
+def _env_get(key: str, alt_keys: list[str] | None = None) -> str:
+    """Читаем переменную окружения: точный ключ, затем альтернативы, затем поиск по всем ключам (без учёта регистра и пробелов)."""
+    v = (os.environ.get(key) or "").strip()
+    if v:
+        return v
+    for k in alt_keys or []:
+        v = (os.environ.get(k) or "").strip()
+        if v:
+            return v
+    key_upper = key.strip().upper().replace(" ", "")
+    for env_key, env_val in os.environ.items():
+        if env_key.strip().upper().replace(" ", "") == key_upper and (env_val or "").strip():
+            return (env_val or "").strip()
+    return ""
+
+
+def _get_pos_link_from_env() -> str:
+    """POS-ссылка только из переменных окружения (при каждом запросе). Поддерживает CRYPTOCLOUD_POS_LINK, CRYPTOCLOUD_POS_ID, CRYPTOCLOUD_POS_URL."""
+    link = _env_get("CRYPTOCLOUD_POS_LINK", ["CRYPTOCLOUD_POS_URL"]).rstrip("/")
+    if link and link.startswith(CRYPTOCLOUD_POS_ALLOWED_PREFIX):
+        return link
+    pos_id = _env_get("CRYPTOCLOUD_POS_ID")
+    if pos_id:
+        safe = "".join(c for c in pos_id if c.isalnum() or c in "-_")
+        if safe:
+            return f"https://pay.cryptocloud.plus/pos/{safe}"
+    return ""
+
+
 def _pos_id_from_link(link: str) -> str | None:
     """Извлекает id страницы из ссылки https://pay.cryptocloud.plus/pos/XXX."""
     if not link or "/pos/" not in link:
@@ -504,14 +534,11 @@ def _pos_id_from_link(link: str) -> str | None:
     return part if part else None
 
 
-def _resolve_pos_link_from_request(pos_link: str | None, pos_id: str | None) -> str:
-    """Собираем POS-ссылку: из тела запроса (приоритет) или из конфига. Для теста можно передать с клиента."""
-    if pos_link and pos_link.strip().startswith(CRYPTOCLOUD_POS_ALLOWED_PREFIX):
-        return pos_link.strip().rstrip("/")
-    if pos_id and pos_id.strip():
-        safe_id = "".join(c for c in pos_id.strip() if c.isalnum() or c in "-_")
-        if safe_id:
-            return f"https://pay.cryptocloud.plus/pos/{safe_id}"
+def _resolve_pos_link() -> str:
+    """POS-ссылка: при каждом запросе из os.environ (гибкий поиск ключей), иначе из config (загрузка при старте)."""
+    link = _get_pos_link_from_env()
+    if link:
+        return link
     return (CRYPTOCLOUD_POS_LINK or "").strip().rstrip("/")
 
 
@@ -519,21 +546,18 @@ def _resolve_pos_link_from_request(pos_link: str | None, pos_id: str | None) -> 
 def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Создать заявку на пополнение через CryptoCloud.
-    Тест: счёт создаётся через постоянную страницу оплаты (POS). Ссылку можно задать:
-    — в переменных окружения (CRYPTOCLOUD_POS_LINK или CRYPTOCLOUD_POS_ID);
-    — или передать в теле запроса (pos_link / pos_id), например с фронта из config.js.
-    Если POS не задан — создаём счёт через API (нужны CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID).
+    Конфиг только из переменных окружения: CRYPTOCLOUD_POS_LINK или CRYPTOCLOUD_POS_ID (тест), либо CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID.
     """
-    pos_link = _resolve_pos_link_from_request(
-        getattr(data, "pos_link", None),
-        getattr(data, "pos_id", None),
-    )
+    pos_link = _resolve_pos_link()
     use_pos = bool(pos_link)
-    use_api = bool(CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)
+    api_key = _env_get("CRYPTOCLOUD_API_KEY") or CRYPTOCLOUD_API_KEY
+    shop_id = _env_get("CRYPTOCLOUD_SHOP_ID") or CRYPTOCLOUD_SHOP_ID
+    use_api = bool(api_key and shop_id)
+    print(f"[deposit] use_pos={use_pos} use_api={use_api} (env keys present: CRYPTOCLOUD_POS_LINK={bool(_env_get('CRYPTOCLOUD_POS_LINK'))} CRYPTOCLOUD_POS_ID={bool(_env_get('CRYPTOCLOUD_POS_ID'))})")
     if not use_pos and not use_api:
         raise HTTPException(
             503,
-            "Пополнение не настроено: укажите POS (pos_link/pos_id в запросе или CRYPTOCLOUD_POS_LINK/POS_ID в env) или API (CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID).",
+            "Пополнение не настроено. Задайте в переменных окружения: CRYPTOCLOUD_POS_LINK или CRYPTOCLOUD_POS_ID (тест), либо CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID.",
         )
     amount_usd = round(float(data.amount), 2)
     if amount_usd < 1 or amount_usd > 10000:
@@ -558,13 +582,13 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
         )
 
     payload = {
-        "shop_id": CRYPTOCLOUD_SHOP_ID,
+        "shop_id": shop_id,
         "amount": amount_usd,
         "currency": "USD",
         "order_id": order_id,
     }
     headers = {
-        "Authorization": f"Token {CRYPTOCLOUD_API_KEY}",
+        "Authorization": f"Token {api_key}",
         "Content-Type": "application/json",
     }
     try:
@@ -647,6 +671,21 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     db.commit()
     event_log(f"Deposit CryptoCloud: user_id={invoice.user_id} amount={amount_usd} invoice_id={invoice.id}")
     return {"ok": True, "message": "Payment credited"}
+
+
+@app.get("/api/deposit-config-check")
+def deposit_config_check():
+    """Проверка, видит ли сервер переменные для пополнения (без вывода секретов). Для отладки на Railway."""
+    pos_from_env = bool(_get_pos_link_from_env())
+    pos_from_config = bool((CRYPTOCLOUD_POS_LINK or "").strip())
+    api_key_set = bool(_env_get("CRYPTOCLOUD_API_KEY") or CRYPTOCLOUD_API_KEY)
+    shop_id_set = bool(_env_get("CRYPTOCLOUD_SHOP_ID") or CRYPTOCLOUD_SHOP_ID)
+    return {
+        "deposit_configured": pos_from_env or pos_from_config or (api_key_set and shop_id_set),
+        "pos_from_env": pos_from_env,
+        "pos_from_config": pos_from_config,
+        "api_configured": api_key_set and shop_id_set,
+    }
 
 
 @app.post("/api/admin/reset-db")
