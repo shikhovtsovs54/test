@@ -55,6 +55,7 @@ from app.schemas import (
     WithdrawalCreateRequest,
 )
 from app.events import get_recent_events, log as event_log
+from app.services import ReferralRequiredError
 import httpx
 import jwt as pyjwt
 
@@ -281,8 +282,14 @@ def auth_telegram(data: TelegramAuthRequest, db: Session = Depends(get_db)):
     print(f"[api] /api/auth/telegram — из initData telegram_id={telegram_id}")
     user = services.get_user_by_telegram_id(db, telegram_id)
     if not user:
-        print(f"[api] /api/auth/telegram — 403: пользователь telegram_id={telegram_id} не найден в БД (сначала нажми Start в боте)")
-        raise HTTPException(403, "User not registered. Open the app from the bot (press Start).")
+        print(f"[api] /api/auth/telegram — 403: пользователь telegram_id={telegram_id} не найден в БД (нужна реферальная ссылка или нажми Start в боте)")
+        raise HTTPException(
+            403,
+            detail={
+                "code": "referral_required",
+                "message": "Для входа нужна реферальная ссылка. Перейдите по ссылке пригласившего вас человека, затем нажмите «Старт» в боте и откройте приложение.",
+            },
+        )
     if not user.is_active:
         print(f"[api] /api/auth/telegram — 403: пользователь id={user.id} отключён")
         raise HTTPException(403, "Account disabled")
@@ -301,14 +308,17 @@ def auth_telegram_id(data: TelegramIdAuthRequest, db: Session = Depends(get_db))
     _ensure_system_user(db)
     user = services.get_user_by_telegram_id(db, data.telegram_id)
     if not user:
-        # Пользователь открыл ссылку, но не нажимал /start — создаём с теми данными, что есть (tg_id + ref)
-        user = services.ensure_telegram_user(
-            db,
-            telegram_id=data.telegram_id,
-            username_from_tg=None,
-            referrer_telegram_id=data.referrer_telegram_id,
-        )
-        print(f"[api] /api/auth/telegram-id — создан пользователь telegram_id={data.telegram_id} user_id={user.id}")
+        try:
+            user = services.ensure_telegram_user(
+                db,
+                telegram_id=data.telegram_id,
+                username_from_tg=None,
+                referrer_telegram_id=data.referrer_telegram_id,
+            )
+            print(f"[api] /api/auth/telegram-id — создан пользователь telegram_id={data.telegram_id} user_id={user.id}")
+        except ReferralRequiredError as e:
+            print(f"[api] /api/auth/telegram-id — 403: регистрация без реферальной ссылки (telegram_id={data.telegram_id})")
+            raise HTTPException(403, detail={"code": "referral_required", "message": str(e)})
     if not user.is_active:
         raise HTTPException(403, "Account disabled")
     token = create_access_token(str(user.id))
@@ -347,6 +357,9 @@ def bot_on_start(
             referrer_telegram_id=data.referrer_telegram_id,
         )
         print(f"[api] /api/bot/on-start — успех: пользователь в БД id={user.id} telegram_id={user.telegram_id}")
+    except ReferralRequiredError as e:
+        print(f"[api] /api/bot/on-start — 403: регистрация без реферальной ссылки (telegram_id={data.telegram_id})")
+        raise HTTPException(403, detail={"code": "referral_required", "message": str(e)})
     except Exception as e:
         import traceback
         print(f"[api] /api/bot/on-start — исключение при записи в БД: {e}")

@@ -6,6 +6,11 @@
 from datetime import datetime
 from typing import List, Optional
 
+
+class ReferralRequiredError(ValueError):
+    """Регистрация без реферальной ссылки запрещена (кроме самого первого пользователя)."""
+    pass
+
 from sqlalchemy.orm import Session
 
 from app.config import (
@@ -312,6 +317,7 @@ def create_telegram_user(
     """
     Создать пользователя по данным из Telegram (без матриц).
     Реферер задаётся по telegram_id; сам на себя ссылаться нельзя (referrer_telegram_id == telegram_id игнорируется).
+    Без реферальной ссылки может зарегистрироваться только самый первый пользователь (когда в БД нет других, кроме системного).
     """
     if referrer_telegram_id is not None and referrer_telegram_id == telegram_id:
         referrer_telegram_id = None
@@ -320,6 +326,13 @@ def create_telegram_user(
         ref_user = get_user_by_telegram_id(db, referrer_telegram_id)
         if ref_user and ref_user.id != SYSTEM_USER_ID:
             referrer_id = ref_user.id
+
+    real_user_count = db.query(User).filter(User.id != SYSTEM_USER_ID).count()
+    if real_user_count >= 1 and referrer_id is None:
+        raise ReferralRequiredError(
+            "Для регистрации нужна реферальная ссылка. Перейдите по ссылке пригласившего, затем нажмите «Старт» в боте."
+        )
+
     username = (username_from_tg or "").strip() or f"tg{telegram_id}"
     if len(username) > 64:
         username = username[:64]

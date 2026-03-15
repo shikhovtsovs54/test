@@ -156,7 +156,6 @@
     .purchase-form.hidden { display: none; }
     .purchase-all-msg { display: none; padding: 1rem; background: var(--green-dim); border: 1px solid rgba(16,185,129,0.3); border-radius: var(--radius-sm); color: var(--green); font-weight: 500; }
     .purchase-all-msg.visible { display: block; }
-    .purchase-matrix-options { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
     .purchase-matrix-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
     @media (max-width: 520px) { .purchase-matrix-options { grid-template-columns: repeat(2, 1fr); } }
     .purchase-opt {
@@ -392,7 +391,6 @@
     }
     .form-group textarea { min-height: 88px; resize: vertical; }
     .form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
-    .form-group textarea { min-height: 88px; resize: vertical; }
     .btn-primary {
       min-height: 44px;
       padding: 0.65rem 1.5rem;
@@ -416,8 +414,14 @@
   <div id="auth-required-screen" class="login-wrap" style="display: none;">
     <div class="login-card">
       <h1>MATRIX</h1>
-      <p class="auth-required-msg">Откройте бота в приложении Telegram и нажмите кнопку «Открыть веб-приложение» под сообщением бота.</p>
-      <p class="auth-required-support">Не копируйте ссылку в браузер — страница должна открыться внутри Telegram. Если открыли в Safari/Chrome — закройте вкладку и нажмите кнопку в боте снова.</p>
+      <div id="auth-required-default">
+        <p class="auth-required-msg">Откройте бота в приложении Telegram и нажмите кнопку «Открыть веб-приложение» под сообщением бота.</p>
+        <p class="auth-required-support">Не копируйте ссылку в браузер — страница должна открыться внутри Telegram. Если открыли в Safari/Chrome — закройте вкладку и нажмите кнопку в боте снова.</p>
+      </div>
+      <div id="auth-required-referral" style="display: none;">
+        <p class="auth-required-msg">Для входа в приложение нужна реферальная ссылка.</p>
+        <p class="auth-required-support">Перейдите по ссылке того, кто вас пригласил, затем в боте нажмите «Старт» и откройте веб-приложение. Без реферальной ссылки может зарегистрироваться только первый пользователь.</p>
+      </div>
     </div>
   </div>
 
@@ -437,11 +441,11 @@
       <div id="purchase-all-msg" class="purchase-all-msg">У вас куплены все матрицы.</div>
       <div id="purchase-form" class="purchase-form">
         <p class="hint">Выберите уровни для докупки. Списывается с баланса. Купать нужно по порядку: сначала M1, затем M2, затем M3, затем M4.</p>
-        <div class="purchase-matrix-options">
-          <label class="purchase-opt"><input type="checkbox" id="buy-m1" /> <span>M1</span><span class="price">$10</span></label>
-          <label class="purchase-opt"><input type="checkbox" id="buy-m2" /> <span>M2</span><span class="price">$20</span></label>
-          <label class="purchase-opt"><input type="checkbox" id="buy-m3" /> <span>M3</span><span class="price">$40</span></label>
-          <label class="purchase-opt"><input type="checkbox" id="buy-m4" /> <span>M4</span><span class="price">$80</span></label>
+        <div class="purchase-matrix-options" id="purchase-matrix-options">
+          <label class="purchase-opt" id="purchase-opt-1"><input type="checkbox" id="buy-m1" /> <span>M1</span><span class="price">$10</span></label>
+          <label class="purchase-opt" id="purchase-opt-2"><input type="checkbox" id="buy-m2" /> <span>M2</span><span class="price">$20</span></label>
+          <label class="purchase-opt" id="purchase-opt-3"><input type="checkbox" id="buy-m3" /> <span>M3</span><span class="price">$40</span></label>
+          <label class="purchase-opt" id="purchase-opt-4"><input type="checkbox" id="buy-m4" /> <span>M4</span><span class="price">$80</span></label>
         </div>
         <div class="purchase-total">Итого: <span id="purchase-total">$0</span></div>
         <button type="button" class="btn-purchase" id="btn-purchase" disabled>Купить матрицы</button>
@@ -597,9 +601,11 @@
       return text ? JSON.parse(text) : null;
     }
 
-    function showAuthRequired() {
+    function showAuthRequired(referralRequired) {
       document.getElementById('auth-required-screen').style.display = 'flex';
       document.getElementById('dashboard').style.display = 'none';
+      document.getElementById('auth-required-default').style.display = referralRequired ? 'none' : 'block';
+      document.getElementById('auth-required-referral').style.display = referralRequired ? 'block' : 'none';
     }
     function showDashboard() {
       document.getElementById('auth-required-screen').style.display = 'none';
@@ -637,6 +643,13 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
+        if (res.status === 403) {
+          var errBody = await res.json().catch(function() { return {}; });
+          if (errBody.detail && (errBody.detail.code === 'referral_required' || errBody.detail.message)) {
+            showAuthRequired(true);
+            return false;
+          }
+        }
         if (!res.ok) return false;
         var data = await res.json();
         if (data.access_token) {
@@ -658,15 +671,20 @@
       }
       if (!initData) initData = getInitDataFromUrl();
       if (!initData) return false;
-      var ref = getRefFromUrl();
       try {
         var body = { init_data: initData };
-        if (ref != null) body.referrer_telegram_id = ref;
         var res = await fetch(API + '/auth/telegram', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body)
         });
+        if (res.status === 403) {
+          var errBody = await res.json().catch(function() { return {}; });
+          if (errBody.detail && (errBody.detail.code === 'referral_required' || errBody.detail.message)) {
+            showAuthRequired(true);
+            return false;
+          }
+        }
         if (!res.ok) return false;
         var data = await res.json();
         if (data.access_token) {
@@ -716,7 +734,9 @@
     }
 
     function updatePurchaseUI() {
-      var levels = [1,2,3,4].filter(function(l) { return document.getElementById('buy-m' + l).checked; });
+      var levels = [1,2,3,4].filter(function(l) {
+        return purchasedMatrixLevels.indexOf(l) < 0 && document.getElementById('buy-m' + l).checked;
+      });
       var total = levels.reduce(function(s, l) { return s + PRICES[l]; }, 0);
       document.getElementById('purchase-total').textContent = '$' + total;
       var balance = meData && meData.user ? meData.user.balance : 0;
@@ -738,12 +758,14 @@
     }
 
     var meData = null;
+    var purchasedMatrixLevels = [];
+
     async function loadMe() {
       try {
         meData = await api('/auth/me');
       } catch (e) {
         setToken(null);
-        showAuthRequired();
+        showAuthRequired(false);
         return;
       }
       var u = meData.user;
@@ -779,7 +801,9 @@
     });
 
     document.getElementById('btn-purchase').onclick = async function() {
-      var levels = [1,2,3,4].filter(function(l) { return document.getElementById('buy-m' + l).checked; });
+      var levels = [1,2,3,4].filter(function(l) {
+        return purchasedMatrixLevels.indexOf(l) < 0 && document.getElementById('buy-m' + l).checked;
+      });
       if (levels.length === 0) return;
       haptic('light');
       var total = levels.reduce(function(s, l) { return s + PRICES[l]; }, 0);
@@ -793,7 +817,6 @@
         showPurchaseMsg('Матрицы успешно куплены.', false);
         haptic('success');
         [1,2,3,4].forEach(function(l) { document.getElementById('buy-m' + l).checked = false; });
-        updatePurchaseUI();
         loadMe();
       } catch (e) {
         showPurchaseMsg(friendlyPurchaseError(e.message), true);
@@ -882,8 +905,21 @@
         var data = await api('/me/matrices-full');
         var costs = { 1: 10, 2: 20, 3: 40, 4: 80 };
         var matrices = data.matrices || [];
-        var hasAll = matrices.filter(function(m) { return m.matrix_id != null; }).length >= 4;
+        purchasedMatrixLevels = matrices.filter(function(m) { return m.matrix_id != null; }).map(function(m) { return m.level; });
+        var hasAll = purchasedMatrixLevels.length >= 4;
         setPurchaseBlockVisibility(hasAll);
+
+        [1,2,3,4].forEach(function(level) {
+          var opt = document.getElementById('purchase-opt-' + level);
+          if (!opt) return;
+          if (purchasedMatrixLevels.indexOf(level) >= 0) {
+            opt.style.display = 'none';
+            document.getElementById('buy-m' + level).checked = false;
+          } else {
+            opt.style.display = '';
+          }
+        });
+        updatePurchaseUI();
 
         grid.innerHTML = [1,2,3,4].map(function(level) {
           var m = matrices.find(function(x) { return x.level === level; });

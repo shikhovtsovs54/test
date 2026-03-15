@@ -23,6 +23,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 from telegram.error import Conflict
 
 from app.config import TELEGRAM_BOT_TOKEN, TELEGRAM_BOT_USERNAME, WEBAPP_BASE_URL, BOT_ON_START_SECRET
+from app.services import ReferralRequiredError
 
 # Если задан — при /start пишем в БД напрямую (бот запущен вместе с бэкендом на Railway)
 _on_start_db_callback = None
@@ -36,6 +37,12 @@ def set_on_start_db_callback(callback):
 WELCOME = (
     "Вас приветствует проект MATRIX.\n\n"
     "Рады видеть вас в нашем сервисе. Откройте веб-приложение через меню бота (кнопка слева от поля ввода)."
+)
+
+REFERRAL_REQUIRED_MSG = (
+    "Для регистрации в проекте нужна реферальная ссылка.\n\n"
+    "Перейдите по ссылке того, кто вас пригласил, затем снова нажмите «Старт» здесь. "
+    "Без реферальной ссылки может зарегистрироваться только первый пользователь."
 )
 
 
@@ -85,6 +92,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 referrer_telegram_id=referrer_telegram_id,
             )
             print(f"[bot] /start — успех: пользователь записан в БД (напрямую)")
+        except ReferralRequiredError as e:
+            print(f"[bot] /start — регистрация без реферальной ссылки: {e}")
+            await update.message.reply_text(REFERRAL_REQUIRED_MSG)
+            return
         except Exception as e:
             import traceback
             print(f"[bot] /start — ошибка записи в БД: {e}")
@@ -112,6 +123,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                         json=payload,
                         headers={"X-Bot-Secret": BOT_ON_START_SECRET},
                     )
+                    if r.status_code == 403:
+                        try:
+                            body = r.json()
+                            msg = (body.get("detail") or {})
+                            if isinstance(msg, dict):
+                                msg = msg.get("message", REFERRAL_REQUIRED_MSG)
+                            else:
+                                msg = REFERRAL_REQUIRED_MSG
+                        except Exception:
+                            msg = REFERRAL_REQUIRED_MSG
+                        print(f"[bot] /start — 403: нужна реферальная ссылка")
+                        await update.message.reply_text(msg)
+                        return
                     r.raise_for_status()
                     print(f"[bot] /start — успех: пользователь записан в БД (ответ {r.status_code})")
             except httpx.HTTPStatusError as e:
