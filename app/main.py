@@ -592,7 +592,7 @@ def _cryptocloud_verify_token(token: str | None) -> bool:
         return False
 
 
-def _parse_postback_body(request: Request) -> dict:
+async def _parse_postback_body(request: Request) -> dict:
     """CryptoCloud может присылать JSON или application/x-www-form-urlencoded."""
     content_type = (request.headers.get("content-type") or "").lower()
     if "application/json" in content_type:
