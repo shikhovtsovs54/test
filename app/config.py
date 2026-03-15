@@ -76,24 +76,27 @@ if _railway:
     _def = "https://" + _railway.rstrip("/").replace("https://", "").replace("http://", "")
 WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or _def
 
-# CryptoCloud (https://docs.cryptocloud.plus)
-CRYPTOCLOUD_API_KEY = (os.environ.get("CRYPTOCLOUD_API_KEY") or "").strip()
-CRYPTOCLOUD_SHOP_ID = (os.environ.get("CRYPTOCLOUD_SHOP_ID") or "").strip()
-CRYPTOCLOUD_SECRET = (os.environ.get("CRYPTOCLOUD_SECRET") or "").strip()
-# Постоянная страница оплаты (тестовый режим). Задайте один из вариантов:
-# 1) CRYPTOCLOUD_POS_LINK — полная ссылка: https://pay.cryptocloud.plus/pos/nHFyGCeofCdjbV32
-# 2) CRYPTOCLOUD_POS_ID — только id страницы: nHFyGCeofCdjbV32 (ссылку соберём сами)
-def _cryptocloud_pos_link() -> str:
-    link = (os.environ.get("CRYPTOCLOUD_POS_LINK") or "").strip().rstrip("/")
-    if link:
-        return link
-    pos_id = (os.environ.get("CRYPTOCLOUD_POS_ID") or "").strip()
-    if pos_id:
-        return f"https://pay.cryptocloud.plus/pos/{pos_id}"
-    return ""
-
-
-CRYPTOCLOUD_POS_LINK = _cryptocloud_pos_link()
+# CryptoCloud (https://docs.cryptocloud.plus) — читаем так же, как TELEGRAM_BOT_TOKEN
+CRYPTOCLOUD_API_KEY = os.environ.get("CRYPTOCLOUD_API_KEY", "")
+CRYPTOCLOUD_SHOP_ID = os.environ.get("CRYPTOCLOUD_SHOP_ID", "")
+CRYPTOCLOUD_SECRET = os.environ.get("CRYPTOCLOUD_SECRET", "")
+# Постоянная страница оплаты: тот же способ, что и для Telegram — os.environ.get("KEY", "")
+CRYPTOCLOUD_POS_LINK = os.environ.get("CRYPTOCLOUD_POS_LINK", "").strip().rstrip("/")
+if not CRYPTOCLOUD_POS_LINK:
+    _pos_id = os.environ.get("CRYPTOCLOUD_POS_ID", "").strip()
+    if _pos_id:
+        CRYPTOCLOUD_POS_LINK = f"https://pay.cryptocloud.plus/pos/{_pos_id}"
+# Если по точному имени не нашли — ищем переменную, в имени которой есть POS и (LINK или ID)
+if not CRYPTOCLOUD_POS_LINK:
+    for _k, _v in os.environ.items():
+        _ku = _k.upper()
+        _vu = (_v or "").strip()
+        if "POS" in _ku and "LINK" in _ku and _vu and _vu.startswith("http"):
+            CRYPTOCLOUD_POS_LINK = _vu.rstrip("/")
+            break
+        if "POS" in _ku and _ku.endswith("_ID") and _vu and not _vu.startswith("http"):
+            CRYPTOCLOUD_POS_LINK = f"https://pay.cryptocloud.plus/pos/{_vu}"
+            break
 
 
 def _verify_math() -> None:
