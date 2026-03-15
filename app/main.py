@@ -31,6 +31,7 @@ from app.config import (
     CRYPTOCLOUD_API_KEY,
     CRYPTOCLOUD_SHOP_ID,
     CRYPTOCLOUD_SECRET,
+    CRYPTOCLOUD_POS_LINK,
 )
 from app.auth import verify_password, create_access_token, decode_access_token, hash_password
 from app.telegram_webapp import get_telegram_user
@@ -373,7 +374,7 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         "referrer_username": referrer_username,
         "usdt_wallet_trc20": USDT_WALLET_TRC20,
         "is_root": current_user.username == ROOT_USERNAME,
-        "deposit_cryptocloud_enabled": bool(CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID),
+        "deposit_cryptocloud_enabled": bool(CRYPTOCLOUD_POS_LINK or (CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)),
     }
 
 
@@ -482,10 +483,22 @@ def me_withdrawal(data: WithdrawalCreateRequest, current_user: User = Depends(ge
     return {"ok": True, "message": "Заявка создана", "id": req.id}
 
 
+def _build_pos_deposit_link(amount_usd: float, order_id: str) -> str:
+    """Ссылка на постоянную страницу оплаты (POS) с параметрами amount, order_id, currency."""
+    from urllib.parse import urlencode
+    params = {"amount": amount_usd, "order_id": order_id, "currency": "USD"}
+    return f"{CRYPTOCLOUD_POS_LINK}?{urlencode(params)}"
+
+
 @app.post("/api/me/deposit/create", response_model=DepositCreateResponse)
 def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Создать инвойс на пополнение через CryptoCloud. Возвращает ссылку на оплату."""
-    if not CRYPTOCLOUD_API_KEY or not CRYPTOCLOUD_SHOP_ID:
+    """
+    Создать заявку на пополнение через CryptoCloud.
+    Тестовый режим: если задан CRYPTOCLOUD_POS_LINK — формируется ссылка на постоянную страницу оплаты (amount, order_id в URL).
+    Иначе — создаётся счёт через API и возвращается ссылка на инвойс.
+    """
+    use_pos = bool(CRYPTOCLOUD_POS_LINK)
+    if not use_pos and (not CRYPTOCLOUD_API_KEY or not CRYPTOCLOUD_SHOP_ID):
         raise HTTPException(503, "Пополнение через CryptoCloud не настроено")
     amount_usd = round(float(data.amount), 2)
     if amount_usd < 1 or amount_usd > 10000:
@@ -499,6 +512,16 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
     db.commit()
     db.refresh(invoice)
     order_id = str(invoice.id)
+
+    if use_pos:
+        link = _build_pos_deposit_link(amount_usd, order_id)
+        return DepositCreateResponse(
+            invoice_id=invoice.id,
+            uuid="",
+            link=link,
+            amount_usd=amount_usd,
+        )
+
     payload = {
         "shop_id": CRYPTOCLOUD_SHOP_ID,
         "amount": amount_usd,
