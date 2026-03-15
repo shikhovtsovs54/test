@@ -68,6 +68,14 @@ USDT_WALLET_TRC20 = os.environ.get("USDT_WALLET_TRC20", "TYourTRC20WalletAddress
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_BOT_USERNAME = os.environ.get("TELEGRAM_BOT_USERNAME", "YourBot")  # без @, для ссылки t.me/BotUsername
 BOT_ON_START_SECRET = os.environ.get("BOT_ON_START_SECRET", "")  # секрет для вызова /api/bot/on-start (бот передаёт в заголовке)
+# Telegram ID пользователя, которому разрешена регистрация без реферальной ссылки (на Railway задать в Variables)
+_allowed_no_ref = os.environ.get("ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID", "").strip()
+ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID = None
+if _allowed_no_ref:
+    try:
+        ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID = int(_allowed_no_ref)
+    except ValueError:
+        pass
 # На Railway подставляется RAILWAY_PUBLIC_DOMAIN (например web-production-5046e.up.railway.app)
 # На Render — RENDER_EXTERNAL_URL. Явно задать: WEBAPP_BASE_URL
 _def = "https://your-domain.com"

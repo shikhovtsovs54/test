@@ -20,6 +20,7 @@ from app.config import (
     REINVEST_CONFIG,
     ADMIN_FEE_PERCENT,
     SYSTEM_USER_ID,
+    ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID,
 )
 from app.models import User, UserMatrix, MatrixPosition, Transaction, HoldingPool
 from app.events import log as event_log
@@ -317,7 +318,7 @@ def create_telegram_user(
     """
     Создать пользователя по данным из Telegram (без матриц).
     Реферер задаётся по telegram_id; сам на себя ссылаться нельзя (referrer_telegram_id == telegram_id игнорируется).
-    Без реферальной ссылки может зарегистрироваться только самый первый пользователь (когда в БД нет других, кроме системного).
+    Без реферальной ссылки может зарегистрироваться только пользователь с telegram_id из ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID (переменная окружения).
     """
     if referrer_telegram_id is not None and referrer_telegram_id == telegram_id:
         referrer_telegram_id = None
@@ -328,7 +329,8 @@ def create_telegram_user(
             referrer_id = ref_user.id
 
     real_user_count = db.query(User).filter(User.id != SYSTEM_USER_ID).count()
-    if real_user_count >= 1 and referrer_id is None:
+    allowed_without_ref = ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID is not None and int(telegram_id) == int(ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID)
+    if real_user_count >= 1 and referrer_id is None and not allowed_without_ref:
         raise ReferralRequiredError(
             "Для регистрации нужна реферальная ссылка. Перейдите по ссылке пригласившего, затем нажмите «Старт» в боте."
         )
