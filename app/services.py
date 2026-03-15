@@ -511,12 +511,13 @@ def purchase_matrices(db: Session, user_id: int, levels: List[int], on_bonus_cal
     return True
 
 
-def add_funds(db: Session, user_id: int, amount: float) -> bool:
-    """Пополнение баланса (для тестов)."""
+def add_funds(db: Session, user_id: int, amount: float, description: str | None = None) -> bool:
+    """Пополнение баланса. description — описание для транзакции (по умолчанию «Ручное пополнение»)."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         return False
-    add_to_balance(db, user_id, amount, "credit", "Ручное пополнение (тест)", matrix_id=None)
+    desc = description or "Ручное пополнение (тест)"
+    add_to_balance(db, user_id, amount, "credit", desc, matrix_id=None)
     event_log(f"User {user.username} (id={user_id}) пополнен на ${amount}")
     return True
 

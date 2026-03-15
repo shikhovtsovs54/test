@@ -4,9 +4,10 @@ FastAPI приложение: симуляция матричного марке
 """
 
 import threading
+from datetime import datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Depends, HTTPException, Header
+from fastapi import FastAPI, Depends, HTTPException, Header, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -16,7 +17,7 @@ from sqlalchemy import func
 
 from app.database import get_db, engine, Base, SessionLocal
 from sqlalchemy import text
-from app.models import User, UserMatrix, MatrixPosition, Transaction, HoldingPool, WithdrawalRequest, SupportRequest
+from app.models import User, UserMatrix, MatrixPosition, Transaction, HoldingPool, WithdrawalRequest, SupportRequest, DepositInvoice
 from app.config import (
     SYSTEM_USER_ID,
     MATRIX_PRICES,
@@ -26,6 +27,10 @@ from app.config import (
     TELEGRAM_BOT_TOKEN,
     TELEGRAM_BOT_USERNAME,
     BOT_ON_START_SECRET,
+    WEBAPP_BASE_URL,
+    CRYPTOCLOUD_API_KEY,
+    CRYPTOCLOUD_SHOP_ID,
+    CRYPTOCLOUD_SECRET,
 )
 from app.auth import verify_password, create_access_token, decode_access_token, hash_password
 from app.telegram_webapp import get_telegram_user
@@ -41,14 +46,20 @@ from app.schemas import (
     MatrixDetailResponse,
     PurchaseRequest,
     AddFundsRequest,
+    DepositCreateRequest,
+    DepositCreateResponse,
     TreeResponse,
     StatsResponse,
     SupportCreateRequest,
     WithdrawalCreateRequest,
 )
 from app.events import get_recent_events, log as event_log
+import httpx
+import jwt as pyjwt
 
 security = HTTPBearer(auto_error=False)
+
+CRYPTOCLOUD_API_URL = "https://api.cryptocloud.plus/v2/invoice/create"
 
 app = FastAPI(title="Matrix Marketing Simulator", version="1.0")
 
@@ -123,21 +134,6 @@ def _ensure_root_user(db: Session) -> None:
     db.commit()
 
 
-def _ensure_min_balance_500(db: Session) -> None:
-    """
-    Для всех уже существующих пользователей (кроме системного) гарантируем баланс не меньше 500$.
-    Используется один раз на запуске, чтобы «нарисовать» 500$ пользователям.
-    """
-    q = db.query(User).filter(User.id != SYSTEM_USER_ID, User.balance < 500.0)
-    updated = 0
-    for u in q:
-        u.balance = 500.0
-        updated += 1
-    if updated:
-        db.commit()
-        print(f"[startup] boosted balance to 500$ for {updated} users")
-
-
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: Session = Depends(get_db),
@@ -170,7 +166,6 @@ def startup():
     try:
         _ensure_system_user(db)
         _ensure_root_user(db)
-        _ensure_min_balance_500(db)
     finally:
         db.close()
 
@@ -378,6 +373,7 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         "referrer_username": referrer_username,
         "usdt_wallet_trc20": USDT_WALLET_TRC20,
         "is_root": current_user.username == ROOT_USERNAME,
+        "deposit_cryptocloud_enabled": bool(CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID),
     }
 
 
@@ -486,6 +482,115 @@ def me_withdrawal(data: WithdrawalCreateRequest, current_user: User = Depends(ge
     return {"ok": True, "message": "Заявка создана", "id": req.id}
 
 
+@app.post("/api/me/deposit/create", response_model=DepositCreateResponse)
+def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Создать инвойс на пополнение через CryptoCloud. Возвращает ссылку на оплату."""
+    if not CRYPTOCLOUD_API_KEY or not CRYPTOCLOUD_SHOP_ID:
+        raise HTTPException(503, "Пополнение через CryptoCloud не настроено")
+    amount_usd = round(float(data.amount), 2)
+    if amount_usd < 1 or amount_usd > 10000:
+        raise HTTPException(400, "Сумма от 1 до 10000 USD")
+    invoice = DepositInvoice(
+        user_id=current_user.id,
+        amount_usd=amount_usd,
+        status="pending",
+    )
+    db.add(invoice)
+    db.commit()
+    db.refresh(invoice)
+    order_id = str(invoice.id)
+    payload = {
+        "shop_id": CRYPTOCLOUD_SHOP_ID,
+        "amount": amount_usd,
+        "currency": "USD",
+        "order_id": order_id,
+    }
+    headers = {
+        "Authorization": f"Token {CRYPTOCLOUD_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    try:
+        resp = httpx.post(CRYPTOCLOUD_API_URL, json=payload, headers=headers, timeout=15.0)
+        body = resp.json() if resp.content else {}
+    except Exception as e:
+        print(f"[deposit] CryptoCloud API error: {e}")
+        raise HTTPException(502, "Ошибка платёжного провайдера")
+    if resp.status_code != 200 or body.get("status") != "success":
+        err = body.get("result") or body.get("error") or resp.text
+        print(f"[deposit] CryptoCloud create failed: {resp.status_code} {err}")
+        raise HTTPException(502, "Не удалось создать счёт на оплату")
+    result = body.get("result", {})
+    uuid_val = result.get("uuid") or ""
+    link = result.get("link") or ""
+    if not link and uuid_val:
+        link = f"https://pay.cryptocloud.plus/{uuid_val.replace('INV-', '')}"
+    invoice.invoice_uuid = uuid_val
+    db.commit()
+    return DepositCreateResponse(
+        invoice_id=invoice.id,
+        uuid=uuid_val,
+        link=link,
+        amount_usd=amount_usd,
+    )
+
+
+def _cryptocloud_verify_token(token: str | None) -> bool:
+    """Проверка JWT от CryptoCloud (HS256, секрет CRYPTOCLOUD_SECRET)."""
+    if not token or not isinstance(token, str):
+        return False
+    token = token.strip()
+    if not token or not CRYPTOCLOUD_SECRET:
+        return False
+    try:
+        pyjwt.decode(token, CRYPTOCLOUD_SECRET, algorithms=["HS256"])
+        return True
+    except pyjwt.PyJWTError:
+        return False
+
+
+@app.post("/api/payments/cryptocloud/postback")
+async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
+    """
+    Webhook от CryptoCloud после успешной оплаты инвойса.
+    В настройках проекта CryptoCloud укажите URL: {WEBAPP_BASE_URL}/api/payments/cryptocloud/postback
+    и формат POSTBACK: JSON.
+    """
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(400, "Invalid JSON")
+    if not isinstance(data, dict):
+        raise HTTPException(400, "Invalid body")
+    status = data.get("status")
+    invoice_id_raw = data.get("invoice_id")
+    order_id = data.get("order_id")
+    token = data.get("token")
+    if not order_id:
+        raise HTTPException(400, "Missing order_id")
+    if CRYPTOCLOUD_SECRET and not _cryptocloud_verify_token(token):
+        raise HTTPException(401, "Invalid token")
+    try:
+        our_invoice_id = int(order_id)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid order_id")
+    invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
+    if not invoice:
+        raise HTTPException(404, "Invoice not found")
+    if invoice.status == "paid":
+        return {"ok": True, "message": "Already processed"}
+    if status != "success":
+        return {"ok": True, "message": "Status not success, ignored"}
+    amount_usd = float(invoice.amount_usd)
+    ok = services.add_funds(db, invoice.user_id, amount_usd, description="Пополнение CryptoCloud")
+    if not ok:
+        raise HTTPException(500, "User not found")
+    invoice.status = "paid"
+    invoice.paid_at = datetime.utcnow()
+    db.commit()
+    event_log(f"Deposit CryptoCloud: user_id={invoice.user_id} amount={amount_usd} invoice_id={invoice.id}")
+    return {"ok": True, "message": "Payment credited"}
+
+
 @app.post("/api/admin/reset-db")
 def admin_reset_db(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Полностью обнулить БД, оставив только системного пользователя и root (баланс root = 0)."""
@@ -496,6 +601,7 @@ def admin_reset_db(current_user: User = Depends(get_current_user), db: Session =
     root_id = root.id
     db.query(WithdrawalRequest).delete()
     db.query(SupportRequest).delete()
+    db.query(DepositInvoice).delete()
     db.query(Transaction).delete()
     db.query(MatrixPosition).delete()
     db.query(UserMatrix).delete()

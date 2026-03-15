@@ -65,6 +65,19 @@ class WithdrawalCreateRequest(BaseModel):
     trc20_wallet: str = Field(..., min_length=8, max_length=128)
 
 
+class DepositCreateRequest(BaseModel):
+    """Запрос на создание счёта пополнения через CryptoCloud."""
+    amount: float = Field(..., ge=1, le=10000, description="Сумма в USD")
+
+
+class DepositCreateResponse(BaseModel):
+    """Ответ после создания инвойса CryptoCloud."""
+    invoice_id: int = Field(..., description="ID заявки в нашей системе")
+    uuid: str = Field(..., description="UUID инвойса (INV-xxx)")
+    link: str = Field(..., description="Ссылка на страницу оплаты")
+    amount_usd: float = Field(..., description="Сумма в USD")
+
+
 class UserMatrixResponse(BaseModel):
     id: int
     user_id: int

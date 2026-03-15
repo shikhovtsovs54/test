@@ -115,3 +115,16 @@ class SupportRequest(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="support_requests", foreign_keys=[user_id])
+
+
+class DepositInvoice(Base):
+    """Заявка на пополнение через CryptoCloud. order_id уходит в API, в postback по нему находим user_id."""
+    __tablename__ = "deposit_invoices"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    amount_usd = Column(Float, nullable=False)
+    invoice_uuid = Column(String(64), nullable=True, index=True)  # INV-xxx от CryptoCloud
+    status = Column(String(20), default="pending")  # pending, paid, expired, failed
+    created_at = Column(DateTime, default=datetime.utcnow)
+    paid_at = Column(DateTime, nullable=True)

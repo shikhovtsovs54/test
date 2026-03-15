@@ -76,6 +76,11 @@ if _railway:
     _def = "https://" + _railway.rstrip("/").replace("https://", "").replace("http://", "")
 WEBAPP_BASE_URL = os.environ.get("WEBAPP_BASE_URL") or os.environ.get("RENDER_EXTERNAL_URL") or _def
 
+# CryptoCloud (https://docs.cryptocloud.plus)
+CRYPTOCLOUD_API_KEY = os.environ.get("CRYPTOCLOUD_API_KEY", "")
+CRYPTOCLOUD_SHOP_ID = os.environ.get("CRYPTOCLOUD_SHOP_ID", "")
+CRYPTOCLOUD_SECRET = os.environ.get("CRYPTOCLOUD_SECRET", "")  # для проверки JWT в postback
+
 
 def _verify_math() -> None:
     """Проверка: чистая выплата за 4 места = доход минус реинвест."""
