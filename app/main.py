@@ -447,14 +447,14 @@ def me_purchase(data: PurchaseRequest, current_user: User = Depends(get_current_
 def me_transactions(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """История транзакций текущего пользователя."""
     txs = db.query(Transaction).filter(Transaction.user_id == current_user.id).order_by(Transaction.created_at.desc()).limit(200).all()
-    return {"transactions": [{"id": t.id, "amount": t.amount, "type": t.type, "description": t.description, "created_at": t.created_at.isoformat()} for t in txs]}
+    return {"transactions": [{"id": t.id, "amount": t.amount, "type": t.type, "description": t.description, "created_at": (t.created_at.isoformat() if t.created_at else "")} for t in txs]}
 
 
 @app.get("/api/me/referrals")
 def me_referrals(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Пользователи, зарегистрированные по моей реферальной ссылке."""
     refs = db.query(User).filter(User.referrer_id == current_user.id, User.id != SYSTEM_USER_ID).order_by(User.created_at.desc()).all()
-    return {"referrals": [{"id": u.id, "username": u.username, "created_at": u.created_at.isoformat()} for u in refs]}
+    return {"referrals": [{"id": u.id, "username": u.username, "created_at": (u.created_at.isoformat() if u.created_at else "")} for u in refs]}
 
 
 @app.post("/api/me/support")
@@ -592,22 +592,44 @@ def _cryptocloud_verify_token(token: str | None) -> bool:
         return False
 
 
+def _parse_postback_body(request: Request) -> dict:
+    """CryptoCloud может присылать JSON или application/x-www-form-urlencoded."""
+    content_type = (request.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        try:
+            return await request.json()
+        except Exception:
+            return {}
+    # form-urlencoded: order_id, status, token, invoice_id и т.д. приходят как плоские поля
+    try:
+        body = await request.body()
+        from urllib.parse import parse_qs
+        parsed = parse_qs(body.decode("utf-8") if isinstance(body, bytes) else body, keep_blank_values=True)
+        return {k: (v[0] if isinstance(v, list) and v else v) for k, v in parsed.items()}
+    except Exception:
+        return {}
+
+
 @app.post("/api/payments/cryptocloud/postback")
 async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     """
     Webhook от CryptoCloud после успешной оплаты.
-    В настройках проекта CryptoCloud: URL уведомлений = {WEBAPP_BASE_URL}/api/payments/cryptocloud/postback, формат JSON.
+    URL уведомлений = {WEBAPP_BASE_URL}/api/payments/cryptocloud/postback. Принимаем JSON и form-urlencoded.
     """
-    try:
-        data = await request.json()
-    except Exception:
-        raise HTTPException(400, "Invalid JSON")
-    if not isinstance(data, dict):
+    data = await _parse_postback_body(request)
+    if not data:
         raise HTTPException(400, "Invalid body")
     status = data.get("status")
     order_id = data.get("order_id")
     if order_id is None and isinstance(data.get("invoice_info"), dict):
         order_id = data["invoice_info"].get("order_id")
+    if order_id is None and isinstance(data.get("invoice_info"), str):
+        try:
+            import json
+            info = json.loads(data["invoice_info"])
+            order_id = info.get("order_id") if isinstance(info, dict) else None
+        except Exception:
+            pass
     token = data.get("token")
     # Лог без токена для отладки (в Railway видно, что пришло)
     _log_data = {k: v for k, v in data.items() if k != "token"}
@@ -619,6 +641,8 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
         print("[postback] order_id missing — в настройках CryptoCloud проверьте, что при создании счёта передаётся order_id (наш id заявки)")
         return {"ok": True, "message": "order_id missing, cannot credit"}
     try:
+        if isinstance(order_id, str):
+            order_id = order_id.strip()
         our_invoice_id = int(order_id) if not isinstance(order_id, int) else order_id
     except (ValueError, TypeError):
         print(f"[postback] order_id not int: {order_id!r}")
