@@ -82,7 +82,7 @@ CRYPTOCLOUD_SHOP_ID = os.environ.get("CRYPTOCLOUD_SHOP_ID", "")
 CRYPTOCLOUD_SECRET = os.environ.get("CRYPTOCLOUD_SECRET", "")  # для проверки JWT в postback
 # Постоянная страница оплаты (тестовый режим): https://pay.cryptocloud.plus/pos/<id>
 # Если задана — ссылка на пополнение формируется через неё (amount, order_id в URL), без вызова API.
-CRYPTOCLOUD_POS_LINK = os.environ.get("CRYPTOCLOUD_POS_LINK", "").rstrip("/")
+CRYPTOCLOUD_POS_LINK = (os.environ.get("CRYPTOCLOUD_POS_LINK") or "").strip().rstrip("/")
 
 
 def _verify_math() -> None:

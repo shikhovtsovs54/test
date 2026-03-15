@@ -3,6 +3,7 @@ FastAPI приложение: симуляция матричного марке
 90% в сеть, 10% проекту. Авторизация, личный кабинет, реферальные ссылки.
 """
 
+import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -374,7 +375,7 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         "referrer_username": referrer_username,
         "usdt_wallet_trc20": USDT_WALLET_TRC20,
         "is_root": current_user.username == ROOT_USERNAME,
-        "deposit_cryptocloud_enabled": bool(CRYPTOCLOUD_POS_LINK or (CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)),
+        "deposit_cryptocloud_enabled": bool(_get_pos_link() or (CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)),
     }
 
 
@@ -483,11 +484,16 @@ def me_withdrawal(data: WithdrawalCreateRequest, current_user: User = Depends(ge
     return {"ok": True, "message": "Заявка создана", "id": req.id}
 
 
-def _build_pos_deposit_link(amount_usd: float, order_id: str) -> str:
+def _build_pos_deposit_link(amount_usd: float, order_id: str, pos_link: str) -> str:
     """Ссылка на постоянную страницу оплаты (POS) с параметрами amount, order_id, currency."""
     from urllib.parse import urlencode
     params = {"amount": amount_usd, "order_id": order_id, "currency": "USD"}
-    return f"{CRYPTOCLOUD_POS_LINK}?{urlencode(params)}"
+    return f"{pos_link}?{urlencode(params)}"
+
+
+def _get_pos_link() -> str:
+    """Читаем POS-ссылку из env (на хостинге переменные могут подставляться при запросе)."""
+    return (os.environ.get("CRYPTOCLOUD_POS_LINK") or "").strip().rstrip("/")
 
 
 @app.post("/api/me/deposit/create", response_model=DepositCreateResponse)
@@ -497,9 +503,10 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
     Тестовый режим: если задан CRYPTOCLOUD_POS_LINK — формируется ссылка на постоянную страницу оплаты (amount, order_id в URL).
     Иначе — создаётся счёт через API и возвращается ссылка на инвойс.
     """
-    use_pos = bool(CRYPTOCLOUD_POS_LINK)
+    pos_link = _get_pos_link()
+    use_pos = bool(pos_link)
     if not use_pos and (not CRYPTOCLOUD_API_KEY or not CRYPTOCLOUD_SHOP_ID):
-        raise HTTPException(503, "Пополнение через CryptoCloud не настроено")
+        raise HTTPException(503, "Пополнение через CryptoCloud не настроено. Задайте CRYPTOCLOUD_POS_LINK или CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID.")
     amount_usd = round(float(data.amount), 2)
     if amount_usd < 1 or amount_usd > 10000:
         raise HTTPException(400, "Сумма от 1 до 10000 USD")
@@ -514,7 +521,7 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
     order_id = str(invoice.id)
 
     if use_pos:
-        link = _build_pos_deposit_link(amount_usd, order_id)
+        link = _build_pos_deposit_link(amount_usd, order_id, pos_link=pos_link)
         return DepositCreateResponse(
             invoice_id=invoice.id,
             uuid="",
