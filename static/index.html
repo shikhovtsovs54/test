@@ -31,6 +31,11 @@
       --radius-sm: 8px;
       --shadow: 0 4px 24px rgba(0,0,0,0.25);
       --min-withdrawal: 10;
+      --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+      --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+      --transition-fast: 0.15s var(--ease-out);
+      --transition-normal: 0.25s var(--ease-out);
+      --transition-slow: 0.35s var(--ease-out);
     }
     * { box-sizing: border-box; }
     body {
@@ -43,7 +48,25 @@
       -webkit-font-smoothing: antialiased;
     }
 
-    .container { max-width: 920px; margin: 0 auto; padding: 1.5rem 1.25rem; }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes slideUp {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    @keyframes cardStagger {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .container {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 1.5rem 1.25rem;
+      animation: fadeIn var(--transition-normal) var(--ease-out);
+    }
 
     .login-wrap {
       min-height: 100vh;
@@ -77,6 +100,7 @@
     .login-card input::placeholder { color: var(--text-muted); }
     .login-card button {
       width: 100%;
+      min-height: 48px;
       padding: 0.85rem 1rem;
       background: var(--accent);
       color: #fff;
@@ -85,8 +109,10 @@
       font-size: 1rem;
       font-weight: 600;
       cursor: pointer;
+      transition: background var(--transition-fast), transform var(--transition-fast);
     }
     .login-card button:hover { background: var(--accent-hover); }
+    .login-card button:active { transform: scale(0.98); }
     .auth-required-msg { margin: 0 0 0.75rem 0; color: var(--text-secondary); }
     .auth-required-support { margin: 0; font-size: 0.9rem; color: var(--text-muted); }
 
@@ -100,9 +126,10 @@
       margin-bottom: 1.5rem;
       border-bottom: 1px solid var(--border);
     }
-    .header-left { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+    .header-left { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
     .header h1 { margin: 0; font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em; }
-    .header .balance { font-size: 1.125rem; font-weight: 600; color: var(--green); padding: 0.35rem 0.75rem; background: var(--green-dim); border-radius: var(--radius-sm); }
+    .header .balance { font-size: 1.125rem; font-weight: 600; color: var(--green); padding: 0.4rem 0.85rem; background: var(--green-dim); border-radius: var(--radius-sm); white-space: nowrap; }
+    @media (max-width: 480px) { .header-left { gap: 0.75rem; } .header .balance { font-size: 1rem; padding: 0.35rem 0.65rem; } }
     .invited-by-block { margin-top: 0.5rem; }
     .invited-by-text { margin: 0; font-size: 0.95rem; color: var(--muted); }
 
@@ -113,7 +140,9 @@
       padding: 1.5rem;
       margin-bottom: 1.25rem;
       box-shadow: 0 1px 0 rgba(255,255,255,0.03);
+      transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
     }
+    .card:hover { border-color: rgba(255,255,255,0.06); }
     .card h2 {
       font-size: 0.8rem;
       font-weight: 600;
@@ -128,64 +157,179 @@
     .purchase-all-msg { display: none; padding: 1rem; background: var(--green-dim); border: 1px solid rgba(16,185,129,0.3); border-radius: var(--radius-sm); color: var(--green); font-weight: 500; }
     .purchase-all-msg.visible { display: block; }
     .purchase-matrix-options { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1rem; }
+    .purchase-matrix-options { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin-bottom: 1rem; }
+    @media (max-width: 520px) { .purchase-matrix-options { grid-template-columns: repeat(2, 1fr); } }
     .purchase-opt {
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 0.5rem;
-      padding: 0.6rem 1rem;
+      padding: 0.75rem 1rem;
       background: var(--bg-elevated);
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       cursor: pointer;
+      transition: border-color var(--transition-fast), background var(--transition-fast), transform var(--transition-fast);
     }
     .purchase-opt:hover { border-color: var(--accent); background: var(--accent-dim); }
+    .purchase-opt:active { transform: scale(0.98); }
     .purchase-opt input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
     .purchase-opt label { cursor: pointer; font-weight: 500; font-size: 0.9rem; }
     .purchase-opt .price { color: var(--text-muted); font-size: 0.85rem; margin-left: 0.25rem; }
     .purchase-total { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; }
     .purchase-total span { color: var(--accent); }
-    .btn-purchase { padding: 0.65rem 1.25rem; background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); font-weight: 600; cursor: pointer; }
+    .btn-purchase {
+      min-height: 44px;
+      padding: 0.65rem 1.5rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-weight: 600;
+      cursor: pointer;
+      transition: background var(--transition-fast), transform var(--transition-fast);
+    }
     .btn-purchase:hover:not(:disabled) { background: var(--accent-hover); }
-    .btn-purchase:disabled { opacity: 0.5; cursor: not-allowed; }
-    .purchase-msg { font-size: 0.9rem; margin-top: 0.75rem; padding: 0.6rem 0.85rem; border-radius: var(--radius-sm); }
+    .btn-purchase:active:not(:disabled) { transform: scale(0.98); }
+    .btn-purchase:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .purchase-msg { font-size: 0.9rem; margin-top: 0.75rem; padding: 0.75rem 1rem; border-radius: var(--radius-sm); animation: slideUp 0.25s var(--ease-out); }
     .purchase-msg.success { background: var(--green-dim); color: var(--green); }
     .purchase-msg.error { background: var(--red-dim); color: var(--red); }
 
-    .ref-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
-    .ref-row input { flex: 1; min-width: 200px; padding: 0.6rem 0.85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-size: 0.9rem; }
-    .ref-row .btn { padding: 0.6rem 1.1rem; background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); cursor: pointer; font-size: 0.9rem; font-weight: 500; }
-    .ref-row .btn:hover { background: var(--accent-hover); }
+    /* Общий стиль кнопок: выравнивание и отклик */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0.65rem 1.25rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background var(--transition-fast), transform var(--transition-fast);
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 
-    .usdt-box { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.25rem; font-family: ui-monospace, monospace; font-size: 0.9rem; word-break: break-all; color: var(--text-secondary); }
+    .ref-row { display: flex; gap: 0.75rem; align-items: stretch; flex-wrap: wrap; }
+    .ref-row input {
+      flex: 1;
+      min-width: 180px;
+      min-height: 44px;
+      padding: 0.65rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-size: 0.9rem;
+      transition: border-color var(--transition-fast);
+    }
+    .ref-row input:focus { outline: none; border-color: var(--accent); }
+    .ref-row .btn { flex-shrink: 0; }
+
+    .usdt-box { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.25rem; font-family: ui-monospace, monospace; font-size: 0.9rem; word-break: break-all; color: var(--text-secondary); transition: border-color var(--transition-fast); }
+    .usdt-box:focus-within { border-color: var(--accent); }
     .usdt-box strong { color: var(--text); }
+    .deposit-link-anchor { display: inline-block; margin-top: 0.5rem; word-break: break-all; }
+    .deposit-open-row { margin-top: 0.75rem; }
+    #deposit-link-box.visible { animation: slideUp 0.3s var(--ease-out); }
 
-    .add-funds-row { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
-    .add-funds-row input { width: 110px; padding: 0.6rem 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-size: 1rem; }
-    .add-funds-row .btn { padding: 0.6rem 1.1rem; background: var(--amber); color: #000; border: none; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 0.9rem; }
+    .add-funds-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: stretch;
+      flex-wrap: wrap;
+      margin-top: 0.5rem;
+    }
+    .add-funds-row input {
+      width: 120px;
+      min-height: 44px;
+      padding: 0.65rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-size: 1rem;
+      transition: border-color var(--transition-fast);
+    }
+    .add-funds-row input:focus { outline: none; border-color: var(--accent); }
+    .add-funds-row .btn { flex-shrink: 0; }
+    #deposit-card .add-funds-row .btn { background: var(--accent); }
+    #deposit-card .add-funds-row .btn:hover { background: var(--accent-hover); }
     .root-actions { margin-top: 0.75rem; }
-    .btn-danger { padding: 0.5rem 1rem; background: rgba(239,68,68,0.2); color: var(--red); border: 1px solid var(--red); border-radius: var(--radius-sm); cursor: pointer; font-size: 0.875rem; font-weight: 500; }
+    #root-add-funds .add-funds-row .btn { background: var(--amber); color: #000; }
+    #root-add-funds .add-funds-row .btn:hover { background: #fbbf24; }
+    .btn-danger {
+      min-height: 44px;
+      padding: 0.6rem 1.1rem;
+      background: rgba(239,68,68,0.2);
+      color: var(--red);
+      border: 1px solid var(--red);
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: background var(--transition-fast), transform var(--transition-fast);
+    }
     .btn-danger:hover { background: rgba(239,68,68,0.3); }
+    .btn-danger:active { transform: scale(0.98); }
 
     #withdrawal-form-block.withdrawal-invalid { border-color: var(--red); background: var(--red-dim); border-radius: var(--radius); }
     #withdrawal-form-block.withdrawal-invalid .form-group input { border-color: rgba(239,68,68,0.4); }
     #withdrawal-submit:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
     .matrices-wrap { overflow: hidden; min-width: 0; max-width: 100%; }
-    .matrices-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.75rem; }
-    @media (max-width: 800px) { .matrices-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-    @media (max-width: 480px) { .matrices-grid { grid-template-columns: 1fr; } }
+    .matrices-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1rem;
+      align-items: start;
+    }
+    @media (max-width: 800px) {
+      .matrices-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.875rem; }
+    }
+    @media (max-width: 480px) {
+      .matrices-grid { grid-template-columns: 1fr; gap: 1rem; max-width: 280px; margin: 0 auto; }
+    }
     .matrix-card {
       background: var(--bg-elevated);
       border: 1px solid var(--border);
       border-radius: var(--radius);
-      padding: 0.85rem;
+      padding: 1rem;
       text-align: center;
       min-width: 0;
+      transition: transform var(--transition-fast), border-color var(--transition-fast);
     }
-    .matrix-card .m-title { font-weight: 700; color: var(--amber); margin-bottom: 0.2rem; font-size: 1rem; }
-    .matrix-card .m-cost { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.6rem; }
-    .matrix-nodes { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
-    .matrix-row { display: flex; justify-content: center; gap: 0.3rem; }
+    .matrix-card:hover { border-color: rgba(255,255,255,0.08); }
+    .matrices-grid .matrix-card { animation: cardStagger 0.35s var(--ease-out) both; }
+    .matrices-grid .matrix-card:nth-child(1) { animation-delay: 0.05s; }
+    .matrices-grid .matrix-card:nth-child(2) { animation-delay: 0.1s; }
+    .matrices-grid .matrix-card:nth-child(3) { animation-delay: 0.15s; }
+    .matrices-grid .matrix-card:nth-child(4) { animation-delay: 0.2s; }
+    .matrix-card .m-title { font-weight: 700; color: var(--amber); margin-bottom: 0.25rem; font-size: 1rem; }
+    .matrix-card .m-cost { font-size: 0.75rem; color: var(--text-muted); margin-bottom: 0.75rem; }
+    /* Симметричная пирамида: 1 — 2,3 — 4,5,6,7. Одинаковые отступы по вертикали и центрирование. */
+    .matrix-nodes {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+    .matrix-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    @media (max-width: 480px) {
+      .matrix-row { gap: 0.4rem; }
+    }
     .node {
       width: 32px;
       height: 32px;
@@ -196,17 +340,34 @@
       font-size: 0.8rem;
       font-weight: 600;
       flex-shrink: 0;
+      transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+    }
+    @media (max-width: 480px) {
+      .node { width: 28px; height: 28px; font-size: 0.75rem; }
     }
     .node.filled { background: var(--green); color: #fff; }
     .node.empty { background: var(--surface); color: var(--text-muted); border: 1px dashed var(--border); }
     .node.owner { background: var(--accent); color: #fff; }
 
-    .tabs { display: flex; gap: 0.15rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
-    .tabs button { padding: 0.65rem 1.1rem; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.9rem; font-weight: 500; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tabs { display: flex; gap: 0; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border); }
+    .tabs button {
+      flex: 1;
+      min-width: 0;
+      padding: 0.75rem 0.5rem;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      font-weight: 500;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      transition: color var(--transition-fast), border-color var(--transition-fast);
+    }
     .tabs button:hover { color: var(--text); }
     .tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
     .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
+    .tab-panel.active { display: block; animation: fadeIn 0.2s var(--ease-out); }
 
     .table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
     table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
@@ -218,11 +379,34 @@
 
     .form-group { margin-bottom: 1.1rem; }
     .form-group label { display: block; margin-bottom: 0.4rem; color: var(--text-secondary); font-size: 0.875rem; font-weight: 500; }
-    .form-group input, .form-group textarea { width: 100%; padding: 0.65rem 0.85rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-elevated); color: var(--text); font-size: 1rem; }
+    .form-group input, .form-group textarea {
+      width: 100%;
+      min-height: 44px;
+      padding: 0.65rem 1rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-size: 1rem;
+      transition: border-color var(--transition-fast);
+    }
+    .form-group textarea { min-height: 88px; resize: vertical; }
     .form-group input:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
     .form-group textarea { min-height: 88px; resize: vertical; }
-    .btn-primary { padding: 0.65rem 1.35rem; background: var(--accent); color: #fff; border: none; border-radius: var(--radius-sm); cursor: pointer; font-weight: 600; font-size: 0.95rem; }
+    .btn-primary {
+      min-height: 44px;
+      padding: 0.65rem 1.5rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.95rem;
+      transition: background var(--transition-fast), transform var(--transition-fast);
+    }
     .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+    .btn-primary:active:not(:disabled) { transform: scale(0.98); }
     .hint { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.4rem; }
     .withdrawal-note { background: var(--surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.25rem; margin-top: 1.25rem; font-size: 0.875rem; color: var(--text-secondary); }
   </style>
@@ -282,8 +466,8 @@
       </div>
       <div id="deposit-link-box" style="display: none; margin-top: 0.75rem;">
         <p class="hint">Счёт создан. Перейдите по ссылке и оплатите. После оплаты средства появятся на балансе автоматически.</p>
-        <a id="deposit-link" href="#" target="_blank" rel="noopener" class="usdt-box" style="display: inline-block; margin-top: 0.25rem; word-break: break-all;">—</a>
-        <div style="margin-top: 0.5rem;">
+        <a id="deposit-link" href="#" target="_blank" rel="noopener" class="usdt-box deposit-link-anchor">—</a>
+        <div class="deposit-open-row">
           <button type="button" class="btn" id="btn-deposit-open">Открыть страницу оплаты</button>
         </div>
       </div>
@@ -378,6 +562,22 @@
 
     function getToken() { return localStorage.getItem(TOKEN_KEY); }
     function setToken(t) { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); }
+
+    /** Тактильная отдача: в Telegram — HapticFeedback, иначе navigator.vibrate (если есть). */
+    function haptic(type) {
+      type = type || 'light';
+      try {
+        var tw = window.Telegram && window.Telegram.WebApp;
+        if (tw && tw.HapticFeedback) {
+          if (type === 'success' && tw.HapticFeedback.notificationOccurred) tw.HapticFeedback.notificationOccurred('success');
+          else if (type === 'warning' && tw.HapticFeedback.notificationOccurred) tw.HapticFeedback.notificationOccurred('warning');
+          else if (tw.HapticFeedback.selectionChanged) tw.HapticFeedback.selectionChanged();
+          else if (tw.HapticFeedback.impactOccurred) tw.HapticFeedback.impactOccurred('light');
+        } else if (navigator.vibrate) {
+          navigator.vibrate(type === 'success' ? [20, 30, 20] : 12);
+        }
+      } catch (e) {}
+    }
 
     /** Открыть ссылку: в Telegram — во внешнем браузере (openLink), иначе window.open. Иначе из WebView страница оплаты не откроется. */
     function openExternalLink(url) {
@@ -569,17 +769,19 @@
     }
 
     document.getElementById('btn-copy-ref').onclick = function() {
+      haptic('success');
       document.getElementById('ref-link').select();
       navigator.clipboard.writeText(document.getElementById('ref-link').value).then(function() { alert('Ссылка скопирована'); });
     };
 
     [1,2,3,4].forEach(function(l) {
-      document.getElementById('buy-m' + l).onchange = updatePurchaseUI;
+      document.getElementById('buy-m' + l).onchange = function() { haptic('selection'); updatePurchaseUI(); };
     });
 
     document.getElementById('btn-purchase').onclick = async function() {
       var levels = [1,2,3,4].filter(function(l) { return document.getElementById('buy-m' + l).checked; });
       if (levels.length === 0) return;
+      haptic('light');
       var total = levels.reduce(function(s, l) { return s + PRICES[l]; }, 0);
       if (meData && meData.user && meData.user.balance < total) {
         showPurchaseMsg('Недостаточно средств на балансе.', true);
@@ -589,29 +791,35 @@
       try {
         await api('/me/purchase', { method: 'POST', body: JSON.stringify({ levels: levels }) });
         showPurchaseMsg('Матрицы успешно куплены.', false);
+        haptic('success');
         [1,2,3,4].forEach(function(l) { document.getElementById('buy-m' + l).checked = false; });
         updatePurchaseUI();
         loadMe();
       } catch (e) {
         showPurchaseMsg(friendlyPurchaseError(e.message), true);
+        haptic('warning');
       }
     };
 
     document.getElementById('btn-deposit-create').onclick = async function() {
       var amount = parseFloat(document.getElementById('deposit-amount').value);
       if (!(amount >= 1 && amount <= 10000)) { alert('Сумма от 1 до 10 000 USD'); return; }
+      haptic('light');
       var btn = document.getElementById('btn-deposit-create');
       btn.disabled = true;
       try {
         var res = await api('/me/deposit/create', { method: 'POST', body: JSON.stringify({ amount: amount }) });
+        haptic('success');
         var linkBox = document.getElementById('deposit-link-box');
         var linkEl = document.getElementById('deposit-link');
         linkEl.href = res.link;
         linkEl.textContent = res.link;
         linkBox.style.display = 'block';
-        linkEl.onclick = function(e) { e.preventDefault(); openExternalLink(res.link); return false; };
-        document.getElementById('btn-deposit-open').onclick = function() { openExternalLink(res.link); };
+        linkBox.classList.add('visible');
+        linkEl.onclick = function(e) { e.preventDefault(); haptic('light'); openExternalLink(res.link); return false; };
+        document.getElementById('btn-deposit-open').onclick = function() { haptic('light'); openExternalLink(res.link); };
       } catch (e) {
+        haptic('warning');
         alert(e.message || 'Ошибка создания счёта');
       }
       btn.disabled = false;
@@ -620,20 +828,24 @@
     document.getElementById('btn-add-funds').onclick = async function() {
       var amount = parseFloat(document.getElementById('add-funds-amount').value);
       if (!(amount > 0) || !meData || !meData.user) return;
+      haptic('light');
       try {
         await api('/admin/add-funds/' + meData.user.id, { method: 'POST', body: JSON.stringify({ amount: amount }) });
+        haptic('success');
         loadMe();
         alert('Баланс пополнен');
-      } catch (e) { alert(e.message); }
+      } catch (e) { haptic('warning'); alert(e.message); }
     };
 
     document.getElementById('btn-reset-db').onclick = async function() {
       if (!confirm('Обнулить всю базу? Останется только пользователь root с нулевым балансом.')) return;
+      haptic('warning');
       try {
         await api('/admin/reset-db', { method: 'POST' });
+        haptic('success');
         alert('База обнулена');
         loadMe();
-      } catch (e) { alert(e.message); }
+      } catch (e) { haptic('warning'); alert(e.message); }
     };
 
     document.getElementById('withdrawal-amount').oninput = updateWithdrawalUI;
@@ -718,6 +930,7 @@
 
     document.querySelectorAll('.tabs button[data-tab]').forEach(function(btn) {
       btn.onclick = function() {
+        haptic('selection');
         document.querySelectorAll('.tabs button[data-tab]').forEach(function(b) { b.classList.remove('active'); });
         document.querySelectorAll('.tab-panel').forEach(function(p) { p.classList.remove('active'); });
         btn.classList.add('active');
@@ -728,6 +941,7 @@
     });
     document.querySelectorAll('.tabs button[data-subtab]').forEach(function(btn) {
       btn.onclick = function() {
+        haptic('selection');
         document.querySelectorAll('.tabs button[data-subtab]').forEach(function(b) { b.classList.remove('active'); });
         document.querySelectorAll('#tab-history .tab-panel').forEach(function(p) { p.classList.remove('active'); });
         btn.classList.add('active');
@@ -738,29 +952,33 @@
 
     document.getElementById('support-form').onsubmit = async function(e) {
       e.preventDefault();
+      haptic('light');
       var telegram = document.getElementById('support-telegram').value.trim();
       var message = document.getElementById('support-message').value.trim() || null;
       try {
         await api('/me/support', { method: 'POST', body: JSON.stringify({ telegram_username: telegram, message: message }) });
+        haptic('success');
         alert('Запрос отправлен');
         document.getElementById('support-telegram').value = '';
         document.getElementById('support-message').value = '';
-      } catch (e) { alert(e.message); }
+      } catch (e) { haptic('warning'); alert(e.message); }
     };
 
     document.getElementById('withdrawal-form').onsubmit = async function(e) {
       e.preventDefault();
+      haptic('light');
       var amount = parseFloat(document.getElementById('withdrawal-amount').value);
       var wallet = document.getElementById('withdrawal-wallet').value.trim();
       var balance = meData && meData.user ? meData.user.balance : 0;
       if (amount < MIN_WITHDRAWAL || amount > balance || wallet.length < 8) return;
       try {
         await api('/me/withdrawal', { method: 'POST', body: JSON.stringify({ amount: amount, trc20_wallet: wallet }) });
+        haptic('success');
         alert('Заявка на вывод создана');
         document.getElementById('withdrawal-amount').value = '';
         document.getElementById('withdrawal-wallet').value = '';
         loadMe();
-      } catch (e) { alert(e.message); }
+      } catch (e) { haptic('warning'); alert(e.message); }
     };
 
     (async function init() {
