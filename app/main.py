@@ -492,8 +492,11 @@ def _build_pos_deposit_link(amount_usd: float, order_id: str, pos_link: str) -> 
 
 
 def _get_pos_link() -> str:
-    """Читаем POS-ссылку из env (на хостинге переменные могут подставляться при запросе)."""
-    return (os.environ.get("CRYPTOCLOUD_POS_LINK") or "").strip().rstrip("/")
+    """POS-ссылка: из env при запросе, иначе из config (значение при старте приложения)."""
+    s = (os.environ.get("CRYPTOCLOUD_POS_LINK") or "").strip().rstrip("/")
+    if s:
+        return s
+    return (CRYPTOCLOUD_POS_LINK or "").strip().rstrip("/")
 
 
 @app.post("/api/me/deposit/create", response_model=DepositCreateResponse)
