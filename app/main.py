@@ -486,9 +486,13 @@ def me_withdrawal(data: WithdrawalCreateRequest, current_user: User = Depends(ge
 
 
 def _build_pos_deposit_link(amount_usd: float, order_id: str, pos_link: str) -> str:
-    """Ссылка на постоянную страницу оплаты (POS) с параметрами amount, order_id, currency."""
+    """Ссылка на постоянную страницу оплаты (POS): сумма и order_id в URL (форма подставляет сумму; postback должен вернуть order_id)."""
     from urllib.parse import urlencode
-    params = {"amount": amount_usd, "order_id": order_id, "currency": "USD"}
+    amount_int = int(round(amount_usd, 0))
+    params = {"amount": amount_int, "order_id": order_id, "currency": "USD"}
+    # часть форм ожидает sum вместо amount
+    if amount_int > 0:
+        params["sum"] = amount_int
     return f"{pos_link}?{urlencode(params)}"
 
 
@@ -591,9 +595,8 @@ def _cryptocloud_verify_token(token: str | None) -> bool:
 @app.post("/api/payments/cryptocloud/postback")
 async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     """
-    Webhook от CryptoCloud после успешной оплаты инвойса.
-    В настройках проекта CryptoCloud укажите URL: {WEBAPP_BASE_URL}/api/payments/cryptocloud/postback
-    и формат POSTBACK: JSON.
+    Webhook от CryptoCloud после успешной оплаты.
+    В настройках проекта CryptoCloud: URL уведомлений = {WEBAPP_BASE_URL}/api/payments/cryptocloud/postback, формат JSON.
     """
     try:
         data = await request.json()
@@ -602,20 +605,28 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     if not isinstance(data, dict):
         raise HTTPException(400, "Invalid body")
     status = data.get("status")
-    invoice_id_raw = data.get("invoice_id")
     order_id = data.get("order_id")
+    if order_id is None and isinstance(data.get("invoice_info"), dict):
+        order_id = data["invoice_info"].get("order_id")
     token = data.get("token")
-    if not order_id:
-        raise HTTPException(400, "Missing order_id")
-    if CRYPTOCLOUD_SECRET and not _cryptocloud_verify_token(token):
+    # Лог без токена для отладки (в Railway видно, что пришло)
+    _log_data = {k: v for k, v in data.items() if k != "token"}
+    print(f"[postback] received: status={status} order_id={order_id} keys={list(_log_data.keys())}")
+    if CRYPTOCLOUD_SECRET and token and not _cryptocloud_verify_token(token):
+        print("[postback] invalid token")
         raise HTTPException(401, "Invalid token")
+    if not order_id:
+        print("[postback] order_id missing — в настройках CryptoCloud проверьте, что при создании счёта передаётся order_id (наш id заявки)")
+        return {"ok": True, "message": "order_id missing, cannot credit"}
     try:
-        our_invoice_id = int(order_id)
+        our_invoice_id = int(order_id) if not isinstance(order_id, int) else order_id
     except (ValueError, TypeError):
-        raise HTTPException(400, "Invalid order_id")
+        print(f"[postback] order_id not int: {order_id!r}")
+        return {"ok": True, "message": "invalid order_id format"}
     invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
     if not invoice:
-        raise HTTPException(404, "Invoice not found")
+        print(f"[postback] DepositInvoice id={our_invoice_id} not found")
+        return {"ok": True, "message": "invoice not found"}
     if invoice.status == "paid":
         return {"ok": True, "message": "Already processed"}
     if status != "success":
@@ -623,11 +634,13 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     amount_usd = float(invoice.amount_usd)
     ok = services.add_funds(db, invoice.user_id, amount_usd, description="Пополнение CryptoCloud")
     if not ok:
+        print(f"[postback] add_funds failed user_id={invoice.user_id}")
         raise HTTPException(500, "User not found")
     invoice.status = "paid"
     invoice.paid_at = datetime.utcnow()
     db.commit()
     event_log(f"Deposit CryptoCloud: user_id={invoice.user_id} amount={amount_usd} invoice_id={invoice.id}")
+    print(f"[postback] credited user_id={invoice.user_id} amount={amount_usd}")
     return {"ok": True, "message": "Payment credited"}
 
 
