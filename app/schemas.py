@@ -68,6 +68,9 @@ class WithdrawalCreateRequest(BaseModel):
 class DepositCreateRequest(BaseModel):
     """Запрос на создание счёта пополнения через CryptoCloud."""
     amount: float = Field(..., ge=1, le=10000, description="Сумма в USD")
+    # Тест: постоянная страница оплаты. Можно передать с клиента (из config.js), если на сервере env не подхватывается.
+    pos_link: Optional[str] = Field(None, max_length=512, description="Полная ссылка https://pay.cryptocloud.plus/pos/...")
+    pos_id: Optional[str] = Field(None, max_length=64, description="Только id страницы (ссылку соберём на бэке)")
 
 
 class DepositCreateResponse(BaseModel):

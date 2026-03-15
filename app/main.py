@@ -3,7 +3,6 @@ FastAPI приложение: симуляция матричного марке
 90% в сеть, 10% проекту. Авторизация, личный кабинет, реферальные ссылки.
 """
 
-import os
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -375,7 +374,9 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         "referrer_username": referrer_username,
         "usdt_wallet_trc20": USDT_WALLET_TRC20,
         "is_root": current_user.username == ROOT_USERNAME,
-        "deposit_cryptocloud_enabled": bool(_get_pos_link() or (CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)),
+        "deposit_cryptocloud_enabled": bool(CRYPTOCLOUD_POS_LINK or (CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)),
+        "cryptocloud_pos_link": (CRYPTOCLOUD_POS_LINK or "").strip() or None,
+        "cryptocloud_pos_id": _pos_id_from_link(CRYPTOCLOUD_POS_LINK),
     }
 
 
@@ -491,11 +492,26 @@ def _build_pos_deposit_link(amount_usd: float, order_id: str, pos_link: str) -> 
     return f"{pos_link}?{urlencode(params)}"
 
 
-def _get_pos_link() -> str:
-    """POS-ссылка: из env при запросе, иначе из config (значение при старте приложения)."""
-    s = (os.environ.get("CRYPTOCLOUD_POS_LINK") or "").strip().rstrip("/")
-    if s:
-        return s
+# Допустимый префикс для POS-ссылки (без доверия к клиенту не редиректим на левые домены)
+CRYPTOCLOUD_POS_ALLOWED_PREFIX = "https://pay.cryptocloud.plus/"
+
+
+def _pos_id_from_link(link: str) -> str | None:
+    """Извлекает id страницы из ссылки https://pay.cryptocloud.plus/pos/XXX."""
+    if not link or "/pos/" not in link:
+        return None
+    part = link.split("/pos/")[-1].split("?")[0].strip()
+    return part if part else None
+
+
+def _resolve_pos_link_from_request(pos_link: str | None, pos_id: str | None) -> str:
+    """Собираем POS-ссылку: из тела запроса (приоритет) или из конфига. Для теста можно передать с клиента."""
+    if pos_link and pos_link.strip().startswith(CRYPTOCLOUD_POS_ALLOWED_PREFIX):
+        return pos_link.strip().rstrip("/")
+    if pos_id and pos_id.strip():
+        safe_id = "".join(c for c in pos_id.strip() if c.isalnum() or c in "-_")
+        if safe_id:
+            return f"https://pay.cryptocloud.plus/pos/{safe_id}"
     return (CRYPTOCLOUD_POS_LINK or "").strip().rstrip("/")
 
 
@@ -503,13 +519,22 @@ def _get_pos_link() -> str:
 def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """
     Создать заявку на пополнение через CryptoCloud.
-    Тестовый режим: если задан CRYPTOCLOUD_POS_LINK — формируется ссылка на постоянную страницу оплаты (amount, order_id в URL).
-    Иначе — создаётся счёт через API и возвращается ссылка на инвойс.
+    Тест: счёт создаётся через постоянную страницу оплаты (POS). Ссылку можно задать:
+    — в переменных окружения (CRYPTOCLOUD_POS_LINK или CRYPTOCLOUD_POS_ID);
+    — или передать в теле запроса (pos_link / pos_id), например с фронта из config.js.
+    Если POS не задан — создаём счёт через API (нужны CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID).
     """
-    pos_link = _get_pos_link()
+    pos_link = _resolve_pos_link_from_request(
+        getattr(data, "pos_link", None),
+        getattr(data, "pos_id", None),
+    )
     use_pos = bool(pos_link)
-    if not use_pos and (not CRYPTOCLOUD_API_KEY or not CRYPTOCLOUD_SHOP_ID):
-        raise HTTPException(503, "Пополнение через CryptoCloud не настроено. Задайте CRYPTOCLOUD_POS_LINK или CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID.")
+    use_api = bool(CRYPTOCLOUD_API_KEY and CRYPTOCLOUD_SHOP_ID)
+    if not use_pos and not use_api:
+        raise HTTPException(
+            503,
+            "Пополнение не настроено: укажите POS (pos_link/pos_id в запросе или CRYPTOCLOUD_POS_LINK/POS_ID в env) или API (CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID).",
+        )
     amount_usd = round(float(data.amount), 2)
     if amount_usd < 1 or amount_usd > 10000:
         raise HTTPException(400, "Сумма от 1 до 10000 USD")

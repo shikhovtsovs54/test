@@ -379,6 +379,15 @@
     function getToken() { return localStorage.getItem(TOKEN_KEY); }
     function setToken(t) { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); }
 
+    /** Открыть ссылку: в Telegram — во внешнем браузере (openLink), иначе window.open. Иначе из WebView страница оплаты не откроется. */
+    function openExternalLink(url) {
+      if (window.Telegram && window.Telegram.WebApp && typeof window.Telegram.WebApp.openLink === 'function') {
+        window.Telegram.WebApp.openLink(url);
+      } else {
+        window.open(url, '_blank', 'noopener,noreferrer');
+      }
+    }
+
     async function api(path, opts = {}) {
       const headers = { 'Content-Type': 'application/json', ...opts.headers };
       if (getToken()) headers['Authorization'] = 'Bearer ' + getToken();
@@ -591,16 +600,22 @@
     document.getElementById('btn-deposit-create').onclick = async function() {
       var amount = parseFloat(document.getElementById('deposit-amount').value);
       if (!(amount >= 1 && amount <= 10000)) { alert('Сумма от 1 до 10 000 USD'); return; }
+      var posLink = (meData && meData.cryptocloud_pos_link) || (window.MATRIX_CRYPTOCLOUD_POS_LINK || '').trim();
+      var posId = (meData && meData.cryptocloud_pos_id) || (window.MATRIX_CRYPTOCLOUD_POS_ID || '').trim();
+      var body = { amount: amount };
+      if (posLink) body.pos_link = posLink;
+      if (posId) body.pos_id = posId;
       var btn = document.getElementById('btn-deposit-create');
       btn.disabled = true;
       try {
-        var res = await api('/me/deposit/create', { method: 'POST', body: JSON.stringify({ amount: amount }) });
+        var res = await api('/me/deposit/create', { method: 'POST', body: JSON.stringify(body) });
         var linkBox = document.getElementById('deposit-link-box');
         var linkEl = document.getElementById('deposit-link');
         linkEl.href = res.link;
         linkEl.textContent = res.link;
         linkBox.style.display = 'block';
-        document.getElementById('btn-deposit-open').onclick = function() { window.open(res.link, '_blank'); };
+        linkEl.onclick = function(e) { e.preventDefault(); openExternalLink(res.link); return false; };
+        document.getElementById('btn-deposit-open').onclick = function() { openExternalLink(res.link); };
       } catch (e) {
         alert(e.message || 'Ошибка создания счёта');
       }
