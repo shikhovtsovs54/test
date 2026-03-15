@@ -593,33 +593,52 @@ def _cryptocloud_verify_token(token: str | None) -> bool:
 
 
 async def _parse_postback_body(request: Request) -> dict:
-    """CryptoCloud может присылать JSON или application/x-www-form-urlencoded."""
-    content_type = (request.headers.get("content-type") or "").lower()
-    if "application/json" in content_type:
-        try:
-            return await request.json()
-        except Exception:
-            return {}
-    # form-urlencoded: order_id, status, token, invoice_id и т.д. приходят как плоские поля
+    """Парсим тело: сначала пробуем JSON (часто приходит с некорректным Content-Type), затем form-urlencoded."""
+    import json
+    from urllib.parse import parse_qs
     try:
         body = await request.body()
-        from urllib.parse import parse_qs
+    except Exception:
+        return {}
+    if not body:
+        return {}
+    # Сначала пробуем JSON (даже если Content-Type не application/json)
+    try:
+        data = json.loads(body.decode("utf-8") if isinstance(body, bytes) else body)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    # Иначе form-urlencoded
+    try:
         parsed = parse_qs(body.decode("utf-8") if isinstance(body, bytes) else body, keep_blank_values=True)
         return {k: (v[0] if isinstance(v, list) and v else v) for k, v in parsed.items()}
     except Exception:
         return {}
 
 
+@app.get("/api/payments/cryptocloud/postback")
+def cryptocloud_postback_get():
+    """
+    При открытии ссылки в браузере (GET) — просто подтверждаем, что URL правильный.
+    Уведомления от CryptoCloud приходят методом POST, не GET.
+    """
+    return {
+        "ok": True,
+        "message": "CryptoCloud postback endpoint. Notifications are sent here via POST after payment; opening this URL in a browser (GET) does nothing. URL is correct.",
+    }
+
+
 @app.post("/api/payments/cryptocloud/postback")
 async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     """
     Webhook от CryptoCloud после успешной оплаты.
-    URL уведомлений = {WEBAPP_BASE_URL}/api/payments/cryptocloud/postback. Принимаем JSON и form-urlencoded.
+    CryptoCloud вызывает этот URL методом POST (не GET). При открытии в браузере сработает GET и вернётся подсказка.
     """
     data = await _parse_postback_body(request)
     if not data:
         raise HTTPException(400, "Invalid body")
-    status = data.get("status")
+    status = (data.get("status") or "").strip().lower() if isinstance(data.get("status"), str) else data.get("status")
     order_id = data.get("order_id")
     if order_id is None and isinstance(data.get("invoice_info"), dict):
         order_id = data["invoice_info"].get("order_id")
@@ -630,10 +649,31 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
             order_id = info.get("order_id") if isinstance(info, dict) else None
         except Exception:
             pass
+    # Поиск order_id во вложенных полях (иногда приходит в другом формате)
+    if order_id is None:
+
+        def _find_order_id(obj, depth=0):
+            if depth > 5:
+                return None
+            if isinstance(obj, dict):
+                if "order_id" in obj and obj["order_id"] not in (None, ""):
+                    return obj["order_id"]
+                for v in obj.values():
+                    r = _find_order_id(v, depth + 1)
+                    if r is not None:
+                        return r
+            elif isinstance(obj, list):
+                for item in obj:
+                    r = _find_order_id(item, depth + 1)
+                    if r is not None:
+                        return r
+            return None
+
+        order_id = _find_order_id(data)
     token = data.get("token")
     # Лог без токена для отладки (в Railway видно, что пришло)
     _log_data = {k: v for k, v in data.items() if k != "token"}
-    print(f"[postback] received: status={status} order_id={order_id} keys={list(_log_data.keys())}")
+    print(f"[postback] received: status={status!r} order_id={order_id!r} keys={list(_log_data.keys())}")
     if CRYPTOCLOUD_SECRET and token and not _cryptocloud_verify_token(token):
         print("[postback] invalid token")
         raise HTTPException(401, "Invalid token")
@@ -649,22 +689,37 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "message": "invalid order_id format"}
     invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
     if not invoice:
-        print(f"[postback] DepositInvoice id={our_invoice_id} not found")
+        print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB")
         return {"ok": True, "message": "invoice not found"}
+    print(f"[postback] found invoice id={invoice.id} user_id={invoice.user_id} amount_usd={invoice.amount_usd}")
     if invoice.status == "paid":
         return {"ok": True, "message": "Already processed"}
-    if status != "success":
+    # Успех: status == "success" на верхнем уровне или invoice_info.invoice_status == "success" / invoice_info.status == "paid"
+    def _norm(s):
+        return (s or "").strip().lower() if isinstance(s, str) else s
+    is_success = _norm(status) == "success"
+    if not is_success and isinstance(data.get("invoice_info"), dict):
+        inv_info = data["invoice_info"]
+        if _norm(inv_info.get("invoice_status")) == "success" or _norm(inv_info.get("status")) == "paid":
+            is_success = True
+    if not is_success:
         return {"ok": True, "message": "Status not success, ignored"}
     amount_usd = float(invoice.amount_usd)
-    ok = services.add_funds(db, invoice.user_id, amount_usd, description="Пополнение CryptoCloud")
+    if amount_usd <= 0:
+        print(f"[postback] skip: amount_usd={amount_usd} <= 0")
+        return {"ok": True, "message": "Invalid amount"}
+    user_id = int(invoice.user_id)
+    print(f"[postback] crediting user_id={user_id} amount={amount_usd}")
+    ok = services.add_funds(db, user_id, amount_usd, description="Пополнение CryptoCloud")
     if not ok:
-        print(f"[postback] add_funds failed user_id={invoice.user_id}")
+        print(f"[postback] add_funds failed user_id={user_id}")
         raise HTTPException(500, "User not found")
+    db.refresh(invoice)
     invoice.status = "paid"
     invoice.paid_at = datetime.utcnow()
     db.commit()
-    event_log(f"Deposit CryptoCloud: user_id={invoice.user_id} amount={amount_usd} invoice_id={invoice.id}")
-    print(f"[postback] credited user_id={invoice.user_id} amount={amount_usd}")
+    event_log(f"Deposit CryptoCloud: user_id={user_id} amount={amount_usd} invoice_id={invoice.id}")
+    print(f"[postback] credited user_id={user_id} amount={amount_usd}")
     return {"ok": True, "message": "Payment credited"}
 
 
