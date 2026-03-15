@@ -486,13 +486,17 @@ def me_withdrawal(data: WithdrawalCreateRequest, current_user: User = Depends(ge
 
 
 def _build_pos_deposit_link(amount_usd: float, order_id: str, pos_link: str) -> str:
-    """Ссылка на постоянную страницу оплаты (POS): сумма и order_id в URL (форма подставляет сумму; postback должен вернуть order_id)."""
+    """Ссылка на постоянную страницу оплаты (POS): сумма из формы и order_id в URL для подстановки на странице оплаты."""
     from urllib.parse import urlencode
+    amount_f = round(float(amount_usd), 2)
     amount_int = int(round(amount_usd, 0))
-    params = {"amount": amount_int, "order_id": order_id, "currency": "USD"}
-    # часть форм ожидает sum вместо amount
-    if amount_int > 0:
-        params["sum"] = amount_int
+    params = {
+        "order_id": order_id,
+        "currency": "USD",
+        "amount": amount_f,      # сумма как число (для подстановки в форму)
+        "amount_usd": amount_f,
+        "sum": amount_int if amount_int > 0 else amount_f,
+    }
     return f"{pos_link}?{urlencode(params)}"
 
 
@@ -740,6 +744,7 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
         if not invoice:
             print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB")
             return {"ok": True, "message": "invoice not found"}
+    # Зачисление только владельцу счёта: invoice создаётся с user_id=current_user.id при «Создать счёт»
     print(f"[postback] found invoice id={invoice.id} user_id={invoice.user_id} amount_usd={invoice.amount_usd}")
     if invoice.status == "paid":
         return {"ok": True, "message": "Already processed"}
@@ -757,8 +762,8 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     if amount_usd <= 0:
         print(f"[postback] skip: amount_usd={amount_usd} <= 0")
         return {"ok": True, "message": "Invalid amount"}
-    user_id = int(invoice.user_id)
-    print(f"[postback] crediting user_id={user_id} amount={amount_usd}")
+    user_id = int(invoice.user_id)  # владелец счёта (тот, кто нажал «Создать счёт на оплату»)
+    print(f"[postback] crediting invoice owner user_id={user_id} amount={amount_usd}")
     ok = services.add_funds(db, user_id, amount_usd, description="Пополнение CryptoCloud")
     if not ok:
         print(f"[postback] add_funds failed user_id={user_id}")
