@@ -478,12 +478,11 @@ def register_user(
     for level in levels_ok:
         create_user_matrix(db, user.id, level)
 
-    # Расставляем новичка начиная с самого верхнего пригласителя,
-    # чтобы вся глубина цепочки отображалась в матрице топ-лидера.
-    top_referrer_id = _get_top_referrer_id(db, referrer_id)
     for level in levels_ok:
-        start_sponsor_id = top_referrer_id or referrer_id
-        find_placement_in_chain(db, start_sponsor_id, user.id, level, on_bonus_callback)
+        # Стартуем расстановку строго с непосредственного пригласителя.
+        # Это гарантирует, что прямой приглашённый встанет в матрицу реферера,
+        # а перелив уже поднимет его выше (в матрицы вышестоящих) по заложенным правилам.
+        find_placement_in_chain(db, referrer_id, user.id, level, on_bonus_callback)
 
     db.commit()
     db.refresh(user)
@@ -571,12 +570,9 @@ def purchase_matrices(db: Session, user_id: int, levels: List[int], on_bonus_cal
         if not has_active_matrix(db, user_id, level):
             create_user_matrix(db, user_id, level)
 
-    # Размещение в цепочке реферера по каждому докупленному уровню (как при регистрации):
-    # начинаем с самого верхнего пригласителя, чтобы докупки тоже учитывались в матрицах лидера.
-    top_referrer_id = _get_top_referrer_id(db, user.referrer_id)
     for level in levels_ok:
-        start_sponsor_id = top_referrer_id or user.referrer_id
-        if find_placement_in_chain(db, start_sponsor_id, user_id, level, on_bonus_callback):
+        # Докупка матриц: также стартуем от непосредственного реферера.
+        if find_placement_in_chain(db, user.referrer_id, user_id, level, on_bonus_callback):
             event_log(f"После докупки: {user.username} (id={user_id}) размещён в цепочке по уровню M{level}")
         # иначе попал в holding_pool по этому уровню — обработается позже
 
