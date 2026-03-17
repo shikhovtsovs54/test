@@ -1026,18 +1026,12 @@
     };
 
     (async function init() {
-      if (getToken()) {
-        try {
-          meData = await api('/auth/me');
-          showDashboard();
-          loadMe();
-          return;
-        } catch (e) {
-          setToken(null);
-        }
-      }
+      // Никогда не доверяем старому токену из localStorage между сессиями Telegram.
+      // Каждый раз при открытии мини-приложения авторизуемся заново по initData,
+      // чтобы исключить ситуацию, когда на одном устройстве сменили аккаунт Telegram,
+      // а остался токен другого пользователя.
+      setToken(null);
       // Единственный допустимый способ авторизации — через Telegram WebApp initData.
-      // Это полностью исключает возможность открыть чужой кабинет по чужому tg_id в URL.
       if (await tryTelegramAuth()) {
         showDashboard();
         loadMe();
