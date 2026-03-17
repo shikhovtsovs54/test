@@ -630,7 +630,12 @@ def purchase_matrices(db: Session, user_id: int, levels: List[int], on_bonus_cal
         # Докупка матриц: также стартуем от непосредственного реферера.
         if find_placement_in_chain(db, user.referrer_id, user_id, level, on_bonus_callback):
             event_log(f"После докупки: {user.username} (id={user_id}) размещён в цепочке по уровню M{level}")
-        # иначе попал в holding_pool по этому уровню — обработается позже
+        # Отражаем покупку в матрице вышестоящего (если есть):
+        if user.referrer_id:
+            referrer = db.query(User).filter(User.id == user.referrer_id).first()
+            parent_id = referrer.referrer_id if referrer else None
+            if parent_id:
+                _reflect_in_parent_matrix(db, parent_id, user.referrer_id, user_id, level, on_bonus_callback)
 
     db.commit()
     return True
