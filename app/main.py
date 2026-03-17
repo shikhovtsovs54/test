@@ -567,9 +567,10 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
-    # Шьём в order_id и id счёта, и id пользователя: invoiceId:userId
-    # Это безопасный способ однозначно определить получателя в postback.
-    order_id = f"{invoice.id}:{current_user.id}"
+    # Шьём в order_id id счёта и Telegram ID пользователя: invoiceId:telegramId
+    # Это даёт однозначную привязку к аккаунту Telegram и хорошо видно в кабинете CryptoCloud.
+    tg_id = current_user.telegram_id or 0
+    order_id = f"{invoice.id}:{int(tg_id)}"
 
     # При наличии API-ключей создаём счёт через API — тогда order_id гарантированно вернётся в postback.
     # POS не передаёт order_id в postback (CryptoCloud присылает order_id: null), поэтому приоритет у API.
@@ -715,14 +716,14 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
         print("[postback] order_id missing — без order_id невозможно однозначно определить пользователя")
         return {"ok": True, "message": "order_id missing, cannot credit"}
 
-    # order_id должен быть в формате "<invoice_id>:<user_id>"
+    # order_id должен быть в формате "<invoice_id>:<telegram_id>"
     raw_order_id = str(order_id).strip()
     try:
         invoice_part, user_part = raw_order_id.split(":", 1)
         our_invoice_id = int(invoice_part)
-        expected_user_id = int(user_part)
+        expected_telegram_id = int(user_part)
     except Exception:
-        print(f"[postback] invalid order_id format (expected 'invoiceId:userId'): {raw_order_id!r}")
+        print(f"[postback] invalid order_id format (expected 'invoiceId:telegramId'): {raw_order_id!r}")
         return {"ok": True, "message": "invalid order_id format"}
 
     invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
@@ -730,9 +731,14 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
         print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB (from order_id={raw_order_id!r})")
         return {"ok": True, "message": "invoice not found"}
 
-    # Дополнительная страховка: проверяем, что user_id в счёте совпадает с тем, что был зашит в order_id
-    if int(invoice.user_id) != expected_user_id:
-        print(f"[postback] user mismatch for invoice id={our_invoice_id}: invoice.user_id={invoice.user_id} expected={expected_user_id}")
+    # Дополнительная страховка: проверяем, что telegram_id владельца совпадает с тем, что был зашит в order_id
+    owner = db.query(User).filter(User.id == invoice.user_id).first()
+    owner_tg_id = int(owner.telegram_id or 0) if owner else 0
+    if expected_telegram_id and owner_tg_id != expected_telegram_id:
+        print(
+            f"[postback] telegram_id mismatch for invoice id={our_invoice_id}: "
+            f"invoice.user_id={invoice.user_id} owner.telegram_id={owner_tg_id} expected_tg_id={expected_telegram_id}"
+        )
         return {"ok": True, "message": "user mismatch, not credited"}
 
     # Зачисление только владельцу счёта
