@@ -844,7 +844,9 @@
         document.getElementById('btn-deposit-open').onclick = function() { haptic('light'); openExternalLink(res.link); };
       } catch (e) {
         haptic('warning');
-        alert(e.message || 'Ошибка создания счёта');
+        var msg = e && e.message ? e.message : 'Ошибка создания счёта.';
+        msg += '\n\nЗакройте веб‑приложение, откройте его заново через бота и попробуйте ещё раз.';
+        alert(msg);
       }
       btn.disabled = false;
     };
@@ -1034,13 +1036,8 @@
           setToken(null);
         }
       }
-      // 1) Попытка авторизации по tg_id из URL (кнопка в инлайн-клавиатуре)
-      if (await tryTelegramIdAuth()) {
-        showDashboard();
-        loadMe();
-        return;
-      }
-      // 2) Если нет tg_id, пробуем Telegram WebApp initData (кнопка WebApp/меню)
+      // Единственный допустимый способ авторизации — через Telegram WebApp initData.
+      // Это полностью исключает возможность открыть чужой кабинет по чужому tg_id в URL.
       if (await tryTelegramAuth()) {
         showDashboard();
         loadMe();

@@ -47,11 +47,9 @@ REFERRAL_REQUIRED_MSG = (
 
 
 def build_webapp_url(telegram_id: int | None, ref: str | None) -> str:
-    """URL веб-приложения; tg_id и ref — параметры в query (?tg_id=...&ref=...)."""
+    """URL веб-приложения; передаём только ref, пользователь определяется по initData Telegram."""
     base = (WEBAPP_BASE_URL or "https://your-domain.com").rstrip("/")
     params = []
-    if telegram_id is not None:
-        params.append(f"tg_id={telegram_id}")
     if ref and str(ref).strip():
         params.append(f"ref={str(ref).strip()}")
     if not params:
