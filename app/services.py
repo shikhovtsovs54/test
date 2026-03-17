@@ -191,6 +191,56 @@ def place_in_matrix(
     return False
 
 
+def _reflect_in_parent_matrix(
+    db: Session,
+    parent_user_id: int,
+    referrer_id: int,
+    new_user_id: int,
+    matrix_level: int,
+    on_bonus_callback=None,
+) -> None:
+    """
+    Дополнительное отображение нового участника в матрице вышестоящего.
+    Сценарий: A пригласил B, B пригласил C.
+    Когда C встаёт в матрицу B, нужно, чтобы C одновременно появился и в матрице A
+    под B (на месте 4/5, если B стоит на 2; на 6/7 — если B стоит на 3).
+    """
+    parent_matrix = get_active_matrix(db, parent_user_id, matrix_level)
+    if not parent_matrix:
+        return
+    # Если этот пользователь уже где-то в матрице родителя — ничего не делаем
+    if _user_already_in_matrix(db, parent_matrix.id, new_user_id):
+        return
+    positions = db.query(MatrixPosition).filter(MatrixPosition.matrix_id == parent_matrix.id).all()
+    ref_pos = next((p for p in positions if p.user_id == referrer_id), None)
+    if not ref_pos:
+        return
+    occupied = {p.position for p in positions}
+    parent_pos_id = None
+    candidates: list[int] = []
+    if ref_pos.position == 2:
+        candidates = [4, 5]
+        parent_pos_id = ref_pos.id
+    elif ref_pos.position == 3:
+        candidates = [6, 7]
+        parent_pos_id = ref_pos.id
+    else:
+        # Для более глубоких уровней пока ничего не делаем
+        return
+    for pos_num in candidates:
+        if pos_num not in occupied:
+            pos = MatrixPosition(
+                matrix_id=parent_matrix.id,
+                user_id=new_user_id,
+                position=pos_num,
+                parent_position_id=parent_pos_id,
+            )
+            db.add(pos)
+            db.commit()
+            _pay_bonus_and_check_completion(db, parent_user_id, parent_matrix.id, matrix_level, on_bonus_callback)
+            return
+
+
 def _pay_bonus_and_check_completion(db: Session, owner_id: int, matrix_id: int, matrix_level: int, on_bonus_callback=None) -> None:
     """Начислить бонус за место в последней линии и проверить закрытие матрицы."""
     bonus = _round_money(MATRIX_BONUS_PER_PLACE[matrix_level])
@@ -480,9 +530,15 @@ def register_user(
 
     for level in levels_ok:
         # Стартуем расстановку строго с непосредственного пригласителя.
-        # Это гарантирует, что прямой приглашённый встанет в матрицу реферера,
-        # а перелив уже поднимет его выше (в матрицы вышестоящих) по заложенным правилам.
+        # Это гарантирует, что прямой приглашённый встанет в матрицу реферера.
         find_placement_in_chain(db, referrer_id, user.id, level, on_bonus_callback)
+        # Дополнительно отражаем нового участника в матрице вышестоящего (если есть):
+        # если B пригласил C, а у B есть реферер A, то C появится и в матрице A под B.
+        if referrer_id:
+            referrer = db.query(User).filter(User.id == referrer_id).first()
+            parent_id = referrer.referrer_id if referrer else None
+            if parent_id:
+                _reflect_in_parent_matrix(db, parent_id, referrer_id, user.id, level, on_bonus_callback)
 
     db.commit()
     db.refresh(user)
