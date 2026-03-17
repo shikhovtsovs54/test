@@ -490,6 +490,7 @@
 
     <div class="card">
       <h2>Мои матрицы</h2>
+      <p class="hint" id="matrix-level-text" style="margin-top: 0.3rem;">Ваш уровень: 1</p>
       <div class="matrices-wrap">
         <div class="matrices-grid" id="matrices-grid"></div>
       </div>
@@ -904,6 +905,11 @@
       try {
         var data = await api('/me/matrices-full');
         var costs = { 1: 10, 2: 20, 3: 40, 4: 80 };
+        if (data.user && typeof data.user.matrix_level === 'number') {
+          var lvl = data.user.matrix_level;
+          var txt = document.getElementById('matrix-level-text');
+          if (txt) txt.textContent = 'Ваш уровень: ' + lvl;
+        }
         var matrices = data.matrices || [];
         purchasedMatrixLevels = matrices.filter(function(m) { return m.matrix_id != null; }).map(function(m) { return m.level; });
         var hasAll = purchasedMatrixLevels.length >= 4;

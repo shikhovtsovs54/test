@@ -429,7 +429,25 @@ def _get_matrices_full_response(db: Session, user_id: int):
             name = (u.username if u else None) or f"id:{p.user_id}"
             positions_out.append({"position": p.position, "username": name})
         result_matrices.append({"level": level, "matrix_id": m.id, "positions": positions_out})
-    return {"user": {"id": user.id, "username": user.username, "balance": user.balance}, "matrices": result_matrices}
+
+    # Уровень пользователя = 1 + количество закрытых матриц (по всем уровням)
+    closed_count = (
+        db.query(func.count(UserMatrix.id))
+        .filter(UserMatrix.user_id == user.id, UserMatrix.status == "closed")
+        .scalar()
+        or 0
+    )
+    user_matrix_level = 1 + int(closed_count)
+
+    return {
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "balance": user.balance,
+            "matrix_level": user_matrix_level,
+        },
+        "matrices": result_matrices,
+    }
 
 
 @app.post("/api/me/purchase")
@@ -549,7 +567,9 @@ def me_deposit_create(data: DepositCreateRequest, current_user: User = Depends(g
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
-    order_id = str(invoice.id)
+    # Шьём в order_id и id счёта, и id пользователя: invoiceId:userId
+    # Это безопасный способ однозначно определить получателя в postback.
+    order_id = f"{invoice.id}:{current_user.id}"
 
     # При наличии API-ключей создаём счёт через API — тогда order_id гарантированно вернётся в postback.
     # POS не передаёт order_id в postback (CryptoCloud присылает order_id: null), поэтому приоритет у API.
@@ -664,36 +684,18 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
         raise HTTPException(400, "Invalid body")
     status = (data.get("status") or "").strip().lower() if isinstance(data.get("status"), str) else data.get("status")
     order_id = data.get("order_id")
-    if order_id is None and isinstance(data.get("invoice_info"), dict):
+    # order_id теперь всегда в формате "<invoice_id>:<user_id>".
+    # Если CryptoCloud присылает order_id только сверху — используем его, иначе пробуем взять из invoice_info.
+    if (order_id is None or order_id in ("", "null")) and isinstance(data.get("invoice_info"), dict):
         order_id = data["invoice_info"].get("order_id")
-    if order_id is None and isinstance(data.get("invoice_info"), str):
+    if (order_id is None or order_id in ("", "null")) and isinstance(data.get("invoice_info"), str):
         try:
             import json
             info = json.loads(data["invoice_info"])
-            order_id = info.get("order_id") if isinstance(info, dict) else None
+            if isinstance(info, dict):
+                order_id = info.get("order_id")
         except Exception:
             pass
-    # Поиск order_id во вложенных полях (иногда приходит в другом формате)
-    if order_id is None:
-
-        def _find_order_id(obj, depth=0):
-            if depth > 5:
-                return None
-            if isinstance(obj, dict):
-                if "order_id" in obj and obj["order_id"] not in (None, ""):
-                    return obj["order_id"]
-                for v in obj.values():
-                    r = _find_order_id(v, depth + 1)
-                    if r is not None:
-                        return r
-            elif isinstance(obj, list):
-                for item in obj:
-                    r = _find_order_id(item, depth + 1)
-                    if r is not None:
-                        return r
-            return None
-
-        order_id = _find_order_id(data)
     token = data.get("token")
     # Лог без токена для отладки (в Railway видно, что пришло)
     _log_data = {k: v for k, v in data.items() if k != "token"}
@@ -708,56 +710,32 @@ async def cryptocloud_postback(request: Request, db: Session = Depends(get_db)):
     if CRYPTOCLOUD_SECRET and token and not _cryptocloud_verify_token(token):
         print("[postback] invalid token")
         raise HTTPException(401, "Invalid token")
-    # Если order_id не пришёл (типично для POS) — пробуем найти заявку по сумме и недавней дате
+
     if not order_id:
-        amount_from_postback = None
-        if isinstance(data.get("invoice_info"), dict):
-            inv = data["invoice_info"]
-            amount_from_postback = inv.get("amount_usd") or inv.get("amount_in_fiat")
-        if amount_from_postback is None:
-            amount_from_postback = data.get("amount_crypto")
-        if amount_from_postback is not None:
-            try:
-                amount_f = float(amount_from_postback)
-            except (TypeError, ValueError):
-                amount_f = None
-            if amount_f and amount_f > 0:
-                from datetime import timedelta
-                since = datetime.utcnow() - timedelta(hours=24)
-                candidates = (
-                    db.query(DepositInvoice)
-                    .filter(
-                        DepositInvoice.status == "pending",
-                        DepositInvoice.amount_usd >= amount_f - 0.01,
-                        DepositInvoice.amount_usd <= amount_f + 0.01,
-                        DepositInvoice.created_at >= since,
-                    )
-                    .order_by(DepositInvoice.created_at.desc())
-                    .all()
-                )
-                if len(candidates) == 1:
-                    invoice = candidates[0]
-                    our_invoice_id = invoice.id
-                    order_id = our_invoice_id
-                    print(f"[postback] order_id was None, matched by amount={amount_f} to invoice id={our_invoice_id}")
-                else:
-                    print(f"[postback] order_id missing, amount={amount_f} matched {len(candidates)} invoices, need exactly one")
-        if not order_id:
-            print("[postback] order_id missing — укажите CRYPTOCLOUD_API_KEY и CRYPTOCLOUD_SHOP_ID для создания счетов через API (тогда order_id будет в postback)")
-            return {"ok": True, "message": "order_id missing, cannot credit"}
-    else:
-        try:
-            if isinstance(order_id, str):
-                order_id = order_id.strip()
-            our_invoice_id = int(order_id) if not isinstance(order_id, int) else order_id
-        except (ValueError, TypeError):
-            print(f"[postback] order_id not int: {order_id!r}")
-            return {"ok": True, "message": "invalid order_id format"}
-        invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
-        if not invoice:
-            print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB")
-            return {"ok": True, "message": "invoice not found"}
-    # Зачисление только владельцу счёта: invoice создаётся с user_id=current_user.id при «Создать счёт»
+        print("[postback] order_id missing — без order_id невозможно однозначно определить пользователя")
+        return {"ok": True, "message": "order_id missing, cannot credit"}
+
+    # order_id должен быть в формате "<invoice_id>:<user_id>"
+    raw_order_id = str(order_id).strip()
+    try:
+        invoice_part, user_part = raw_order_id.split(":", 1)
+        our_invoice_id = int(invoice_part)
+        expected_user_id = int(user_part)
+    except Exception:
+        print(f"[postback] invalid order_id format (expected 'invoiceId:userId'): {raw_order_id!r}")
+        return {"ok": True, "message": "invalid order_id format"}
+
+    invoice = db.query(DepositInvoice).filter(DepositInvoice.id == our_invoice_id).first()
+    if not invoice:
+        print(f"[postback] DepositInvoice id={our_invoice_id} not found in DB (from order_id={raw_order_id!r})")
+        return {"ok": True, "message": "invoice not found"}
+
+    # Дополнительная страховка: проверяем, что user_id в счёте совпадает с тем, что был зашит в order_id
+    if int(invoice.user_id) != expected_user_id:
+        print(f"[postback] user mismatch for invoice id={our_invoice_id}: invoice.user_id={invoice.user_id} expected={expected_user_id}")
+        return {"ok": True, "message": "user mismatch, not credited"}
+
+    # Зачисление только владельцу счёта
     print(f"[postback] found invoice id={invoice.id} user_id={invoice.user_id} amount_usd={invoice.amount_usd}")
     if invoice.status == "paid":
         return {"ok": True, "message": "Already processed"}

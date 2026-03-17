@@ -255,11 +255,44 @@ def auto_reinvest(
             create_user_matrix(db, user_id, level)
     db.commit()
 
-    # Разместить пользователя у первого вышестоящего с активной матрицей этого уровня на первое свободное место
-    if user.referrer_id:
+    # Разместить пользователя у первого вышестоящего с уровнем закрытия матриц
+    # не ниже, чем у реинвестируемого пользователя.
+    # Уровень закрытия считаем как: 1 + количество закрытых матриц пользователя.
+    from sqlalchemy import func
+
+    my_closed = (
+        db.query(func.count(UserMatrix.id))
+        .filter(UserMatrix.user_id == user_id, UserMatrix.status == "closed")
+        .scalar()
+        or 0
+    )
+    my_level = 1 + int(my_closed)
+
+    sponsor_id = user.referrer_id
+    chosen_sponsor_id = None
+    while sponsor_id:
+        sponsor = db.query(User).filter(User.id == sponsor_id).first()
+        if not sponsor:
+            break
+        sponsor_closed = (
+            db.query(func.count(UserMatrix.id))
+            .filter(UserMatrix.user_id == sponsor.id, UserMatrix.status == "closed")
+            .scalar()
+            or 0
+        )
+        sponsor_level = 1 + int(sponsor_closed)
+        if sponsor_level >= my_level:
+            chosen_sponsor_id = sponsor.id
+            break
+        sponsor_id = sponsor.referrer_id
+
+    if chosen_sponsor_id:
         for level in matrices_to_open:
-            if find_placement_in_chain(db, user.referrer_id, user_id, level, on_bonus_callback):
-                event_log(f"После реинвеста: {user.username} (id={user_id}) размещён у вышестоящих по уровню M{level}")
+            if find_placement_in_chain(db, chosen_sponsor_id, user_id, level, on_bonus_callback):
+                event_log(
+                    f"После реинвеста: {user.username} (id={user_id}, level={my_level}) "
+                    f"размещён у вышестоящего user_id={chosen_sponsor_id} по уровню M{level}"
+                )
 
 
 def find_placement_in_chain(
@@ -289,6 +322,24 @@ def find_placement_in_chain(
     db.commit()
     return False
 
+
+def _get_top_referrer_id(db: Session, referrer_id: Optional[int]) -> Optional[int]:
+    """
+    Поднимаемся по цепочке рефералов до самого верхнего (первого) пригласителя.
+    Используется как корень для расстановки в матрицах, чтобы вся глубина структуры
+    (A → B → C → D ...) отображалась в матрице A.
+    """
+    if not referrer_id:
+        return None
+    seen = set()
+    current_id = referrer_id
+    while current_id and current_id not in seen:
+        seen.add(current_id)
+        user = db.query(User).filter(User.id == current_id).first()
+        if not user or not user.referrer_id:
+            break
+        current_id = user.referrer_id
+    return current_id
 
 def _unique_referral_code(db: Session) -> str:
     """Генерирует уникальный реферальный код."""
@@ -427,8 +478,12 @@ def register_user(
     for level in levels_ok:
         create_user_matrix(db, user.id, level)
 
+    # Расставляем новичка начиная с самого верхнего пригласителя,
+    # чтобы вся глубина цепочки отображалась в матрице топ-лидера.
+    top_referrer_id = _get_top_referrer_id(db, referrer_id)
     for level in levels_ok:
-        find_placement_in_chain(db, referrer_id, user.id, level, on_bonus_callback)
+        start_sponsor_id = top_referrer_id or referrer_id
+        find_placement_in_chain(db, start_sponsor_id, user.id, level, on_bonus_callback)
 
     db.commit()
     db.refresh(user)
@@ -516,9 +571,12 @@ def purchase_matrices(db: Session, user_id: int, levels: List[int], on_bonus_cal
         if not has_active_matrix(db, user_id, level):
             create_user_matrix(db, user_id, level)
 
-    # Размещение в цепочке реферера по каждому докупленному уровню (как при регистрации)
+    # Размещение в цепочке реферера по каждому докупленному уровню (как при регистрации):
+    # начинаем с самого верхнего пригласителя, чтобы докупки тоже учитывались в матрицах лидера.
+    top_referrer_id = _get_top_referrer_id(db, user.referrer_id)
     for level in levels_ok:
-        if find_placement_in_chain(db, user.referrer_id, user_id, level, on_bonus_callback):
+        start_sponsor_id = top_referrer_id or user.referrer_id
+        if find_placement_in_chain(db, start_sponsor_id, user_id, level, on_bonus_callback):
             event_log(f"После докупки: {user.username} (id={user_id}) размещён в цепочке по уровню M{level}")
         # иначе попал в holding_pool по этому уровню — обработается позже
 
