@@ -82,7 +82,11 @@ if static_dir.exists():
 
 
 def _migrate_users_table():
-    """Добавить колонки в users при необходимости (миграция со старых БД)."""
+    """Добавить колонки в users при необходимости (миграция только для старой SQLite-БД)."""
+    # В боевой PostgreSQL на Railway схема уже актуальна – миграция не нужна.
+    if engine.url.get_backend_name() != "sqlite":
+        return
+
     with engine.connect() as conn:
         for col, spec in [
             ("password_hash", "VARCHAR(255)"),
@@ -94,7 +98,6 @@ def _migrate_users_table():
                 conn.commit()
             except Exception as e:
                 msg = str(e).lower()
-                # SQLite: duplicate column name / PostgreSQL: duplicate column
                 if "duplicate column" in msg:
                     conn.rollback()
                 else:
