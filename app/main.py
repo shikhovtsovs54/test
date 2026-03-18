@@ -93,7 +93,9 @@ def _migrate_users_table():
                 conn.execute(text(f"ALTER TABLE users ADD COLUMN {col} {spec}"))
                 conn.commit()
             except Exception as e:
-                if "duplicate column name" in str(e).lower():
+                msg = str(e).lower()
+                # SQLite: duplicate column name / PostgreSQL: duplicate column
+                if "duplicate column" in msg:
                     conn.rollback()
                 else:
                     raise
