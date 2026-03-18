@@ -32,6 +32,7 @@ from app.config import (
     CRYPTOCLOUD_SHOP_ID,
     CRYPTOCLOUD_SECRET,
     CRYPTOCLOUD_POS_LINK,
+    ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID,
 )
 from app.auth import verify_password, create_access_token, decode_access_token, hash_password
 from app.telegram_webapp import get_telegram_user
@@ -380,7 +381,7 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         referrer = db.query(User).filter(User.id == current_user.referrer_id).first()
         if referrer:
             referrer_username = referrer.username
-    return {
+    response = {
         "user": UserResponse.model_validate(current_user),
         "referral_link": ref_link,
         "referral_code": current_user.referral_code,
@@ -391,6 +392,14 @@ def auth_me(current_user: User = Depends(get_current_user), db: Session = Depend
         "cryptocloud_pos_link": (CRYPTOCLOUD_POS_LINK or "").strip() or None,
         "cryptocloud_pos_id": _pos_id_from_link(CRYPTOCLOUD_POS_LINK),
     }
+    # Для специального пользователя из ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID добавляем агрегированную статистику
+    if (
+        ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID is not None
+        and current_user.telegram_id is not None
+        and int(current_user.telegram_id) == int(ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID)
+    ):
+        response["admin_summary"] = _get_admin_summary(db)
+    return response
 
 
 @app.get("/api/me/matrices-full")
@@ -451,6 +460,47 @@ def _get_matrices_full_response(db: Session, user_id: int):
             "total_earned": getattr(user, "total_earned", 0.0),
         },
         "matrices": result_matrices,
+    }
+
+
+def _get_admin_summary(db: Session):
+    """Агрегированная статистика по проекту для владельца (по telegram_id из ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID)."""
+    # Всего пользователей (без системного)
+    total_users = (
+        db.query(func.count(User.id))
+        .filter(User.id != SYSTEM_USER_ID)
+        .scalar()
+        or 0
+    )
+    # Активные пользователи: есть хотя бы одна купленная матрица
+    active_users = (
+        db.query(func.count(func.distinct(UserMatrix.user_id)))
+        .filter(UserMatrix.user_id != SYSTEM_USER_ID)
+        .scalar()
+        or 0
+    )
+    # Сколько всего поступило средств от пользователей: суммарный положительный приход по транзакциям (кроме системного пользователя)
+    total_incoming = (
+        db.query(func.coalesce(func.sum(Transaction.amount), 0.0))
+        .filter(
+            Transaction.amount > 0,
+            Transaction.user_id != SYSTEM_USER_ID,
+        )
+        .scalar()
+        or 0.0
+    )
+    # Сумма, которую нужно будет выплатить, если все пользователи выведут всё: суммарный текущий баланс всех обычных пользователей
+    total_liability = (
+        db.query(func.coalesce(func.sum(User.balance), 0.0))
+        .filter(User.id != SYSTEM_USER_ID)
+        .scalar()
+        or 0.0
+    )
+    return {
+        "total_incoming": float(total_incoming),
+        "total_users": int(total_users),
+        "active_users": int(active_users),
+        "total_liability": float(total_liability),
     }
 
 

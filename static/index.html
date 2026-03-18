@@ -444,6 +444,42 @@
     .btn-primary:active:not(:disabled) { transform: scale(0.98); }
     .hint { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.4rem; }
     .withdrawal-note { background: var(--surface-hover); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem 1.25rem; margin-top: 1.25rem; font-size: 0.875rem; color: var(--text-secondary); }
+
+    /* Админ‑блок для владельца (ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID) */
+    .admin-summary-card {
+      margin-top: 1.5rem;
+      background: radial-gradient(circle at top left, rgba(124,58,237,0.16), transparent 55%), var(--surface);
+      border: 1px solid rgba(124,58,237,0.4);
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    }
+    .admin-summary-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+    .admin-summary-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0.9rem 1.25rem;
+    }
+    .admin-summary-item-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 0.15rem;
+    }
+    .admin-summary-item-value {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--text);
+    }
+    @media (max-width: 520px) {
+      .admin-summary-grid {
+        grid-template-columns: 1fr;
+      }
+    }
   </style>
 </head>
 <body>
@@ -594,6 +630,29 @@
           </form>
         </div>
         <div class="withdrawal-note"><strong>Важно:</strong> Все выплаты в настоящий момент производятся вручную в течение 24 часов. В период невысокой нагрузки заявки обрабатываются быстрее.</div>
+      </div>
+    </div>
+
+    <!-- Админ‑панель для владельца (видна только пользователю с telegram_id из ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID) -->
+    <div id="admin-summary-card" class="card admin-summary-card" style="display: none;">
+      <div class="admin-summary-title">Статистика проекта</div>
+      <div class="admin-summary-grid">
+        <div>
+          <div class="admin-summary-item-label">Всего поступило средств</div>
+          <div class="admin-summary-item-value">$<span id="admin-total-incoming">0.00</span></div>
+        </div>
+        <div>
+          <div class="admin-summary-item-label">Всего пользователей</div>
+          <div class="admin-summary-item-value"><span id="admin-total-users">0</span></div>
+        </div>
+        <div>
+          <div class="admin-summary-item-label">Активных пользователей</div>
+          <div class="admin-summary-item-value"><span id="admin-active-users">0</span></div>
+        </div>
+        <div>
+          <div class="admin-summary-item-label">Потенциальные выплаты (если все выведут)</div>
+          <div class="admin-summary-item-value">$<span id="admin-total-liability">0.00</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -832,6 +891,18 @@
       }
       document.getElementById('ref-link').value = meData.referral_link || (meData.referral_code ? (window.location.origin + '/?ref=' + meData.referral_code) : '');
       if (meData.is_root) document.getElementById('root-add-funds').style.display = 'block';
+      // Админ‑сводка для владельца (по ALLOWED_REGISTER_WITHOUT_REF_TELEGRAM_ID)
+      var adminCard = document.getElementById('admin-summary-card');
+      if (meData.admin_summary) {
+        var a = meData.admin_summary;
+        document.getElementById('admin-total-incoming').textContent = Number(a.total_incoming || 0).toFixed(2);
+        document.getElementById('admin-total-users').textContent = String(a.total_users || 0);
+        document.getElementById('admin-active-users').textContent = String(a.active_users || 0);
+        document.getElementById('admin-total-liability').textContent = Number(a.total_liability || 0).toFixed(2);
+        adminCard.style.display = 'block';
+      } else if (adminCard) {
+        adminCard.style.display = 'none';
+      }
       document.getElementById('withdrawal-amount').max = Math.max(MIN_WITHDRAWAL, u.balance);
       updateWithdrawalUI();
       updatePurchaseUI();
