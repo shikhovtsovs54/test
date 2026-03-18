@@ -39,7 +39,12 @@ PGSession = sessionmaker(bind=pg_engine)
 
 
 def copy_table(src_sess, dst_sess, Model):
-    rows = src_sess.query(Model).all()
+    try:
+        rows = src_sess.query(Model).all()
+    except Exception as e:
+        # Если таблицы нет в старой БД — просто пропускаем
+        print(f"Skip {Model.__tablename__}: {e}")
+        return
     if not rows:
         return
     objs = []
