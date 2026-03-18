@@ -429,7 +429,6 @@
     <header class="header">
       <div class="header-left">
         <h1 id="header-username">—</h1>
-        <span class="balance">Баланс: $<span id="header-balance">0.00</span></span>
       </div>
     </header>
     <div id="invited-by-block" class="card invited-by-block" style="display: none;">
@@ -489,8 +488,13 @@
     </div>
 
     <div class="card">
+      <h2>Финансы</h2>
+      <p>Ваш баланс: $<span id="finance-balance">0.00</span></p>
+      <p>Всего заработано: $<span id="finance-total-earned">0.00</span></p>
+    </div>
+
+    <div class="card">
       <h2>Мои матрицы</h2>
-      <p class="hint" id="matrix-level-text" style="margin-top: 0.3rem;">Ваш уровень: 1</p>
       <div class="matrices-wrap">
         <div class="matrices-grid" id="matrices-grid"></div>
       </div>
@@ -771,7 +775,9 @@
       }
       var u = meData.user;
       document.getElementById('header-username').textContent = u.username;
-      document.getElementById('header-balance').textContent = Number(u.balance).toFixed(2);
+      document.getElementById('finance-balance').textContent = Number(u.balance).toFixed(2);
+      var totalEarned = typeof u.total_earned === 'number' ? u.total_earned : 0;
+      document.getElementById('finance-total-earned').textContent = Number(totalEarned).toFixed(2);
       document.getElementById('withdrawal-available').textContent = Number(u.balance).toFixed(2);
       var invitedBy = document.getElementById('invited-by-block');
       var refNameEl = document.getElementById('referrer-username');
@@ -893,13 +899,14 @@
       var title = filled ? (fullName + ' (позиция ' + pos + ')') : ('Позиция ' + pos);
       return '<div class="' + cls + '" title="' + escapeHtml(title) + '">' + escapeHtml(display) + '</div>';
     }
-    function renderMatrix(level, positions, cost) {
+    function renderMatrix(level, positions, cost, userLevel) {
       var rows = [
         '<div class="matrix-row">' + renderNode(1, positions) + '</div>',
         '<div class="matrix-row">' + renderNode(2, positions) + renderNode(3, positions) + '</div>',
         '<div class="matrix-row">' + renderNode(4, positions) + renderNode(5, positions) + renderNode(6, positions) + renderNode(7, positions) + '</div>'
       ];
-      return '<div class="matrix-card"><div class="m-title">M' + level + '</div><div class="m-cost">$' + cost + '</div><div class="matrix-nodes">' + rows.join('') + '</div></div>';
+      var lvlText = typeof userLevel === 'number' ? ('Уровень: ' + userLevel) : '';
+      return '<div class="matrix-card"><div class="m-title">M' + level + '</div><div class="m-cost">$' + cost + '</div><div class="hint">' + lvlText + '</div><div class="matrix-nodes">' + rows.join('') + '</div></div>';
     }
 
     async function loadMatrices() {
@@ -907,11 +914,6 @@
       try {
         var data = await api('/me/matrices-full');
         var costs = { 1: 10, 2: 20, 3: 40, 4: 80 };
-        if (data.user && typeof data.user.matrix_level === 'number') {
-          var lvl = data.user.matrix_level;
-          var txt = document.getElementById('matrix-level-text');
-          if (txt) txt.textContent = 'Ваш уровень: ' + lvl;
-        }
         var matrices = data.matrices || [];
         purchasedMatrixLevels = matrices.filter(function(m) { return m.matrix_id != null; }).map(function(m) { return m.level; });
         var hasAll = purchasedMatrixLevels.length >= 4;
@@ -931,7 +933,9 @@
 
         grid.innerHTML = [1,2,3,4].map(function(level) {
           var m = matrices.find(function(x) { return x.level === level; });
-          return renderMatrix(level, m && m.positions ? m.positions : [], costs[level]);
+          var positions = m && m.positions ? m.positions : [];
+          var userLevel = m && typeof m.user_level === 'number' ? m.user_level : null;
+          return renderMatrix(level, positions, costs[level], userLevel);
         }).join('');
       } catch (e) {
         grid.innerHTML = '<p class="hint">Ошибка загрузки матриц</p>';

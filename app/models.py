@@ -20,6 +20,7 @@ class User(Base):
     referral_code = Column(String(32), unique=True, nullable=True, index=True)
     referrer_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     balance = Column(Float, default=0.0)
+    total_earned = Column(Float, default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_active = Column(Boolean, default=True)
 

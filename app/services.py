@@ -42,6 +42,9 @@ def add_to_balance(db: Session, user_id: int, amount: float, tx_type: str, descr
     if user is None:
         return
     user.balance = _round_money(user.balance + amount)
+    # Счётчик «всего заработано»: увеличиваем только при положительных начислениях.
+    if amount > 0:
+        user.total_earned = _round_money((user.total_earned or 0.0) + amount)
     db.add(Transaction(user_id=user_id, amount=amount, type=tx_type, description=description, matrix_id=matrix_id))
     db.commit()
 
@@ -305,42 +308,49 @@ def auto_reinvest(
             create_user_matrix(db, user_id, level)
     db.commit()
 
-    # Разместить пользователя у первого вышестоящего с уровнем закрытия матриц
-    # не ниже, чем у реинвестируемого пользователя.
-    # Уровень закрытия считаем как: 1 + количество закрытых матриц пользователя.
+    # Для каждого уровня реинвеста отдельно ищем вышестоящего с уровнем
+    # закрытий по этой матрице не ниже, чем у текущего пользователя.
     from sqlalchemy import func
 
-    my_closed = (
-        db.query(func.count(UserMatrix.id))
-        .filter(UserMatrix.user_id == user_id, UserMatrix.status == "closed")
-        .scalar()
-        or 0
-    )
-    my_level = 1 + int(my_closed)
-
-    sponsor_id = user.referrer_id
-    chosen_sponsor_id = None
-    while sponsor_id:
-        sponsor = db.query(User).filter(User.id == sponsor_id).first()
-        if not sponsor:
-            break
-        sponsor_closed = (
+    for level in matrices_to_open:
+        my_closed = (
             db.query(func.count(UserMatrix.id))
-            .filter(UserMatrix.user_id == sponsor.id, UserMatrix.status == "closed")
+            .filter(
+                UserMatrix.user_id == user_id,
+                UserMatrix.matrix_level == level,
+                UserMatrix.status == "closed",
+            )
             .scalar()
             or 0
         )
-        sponsor_level = 1 + int(sponsor_closed)
-        if sponsor_level >= my_level:
-            chosen_sponsor_id = sponsor.id
-            break
-        sponsor_id = sponsor.referrer_id
+        my_level = 1 + int(my_closed)
 
-    if chosen_sponsor_id:
-        for level in matrices_to_open:
+        sponsor_id = user.referrer_id
+        chosen_sponsor_id = None
+        while sponsor_id:
+            sponsor = db.query(User).filter(User.id == sponsor_id).first()
+            if not sponsor:
+                break
+            sponsor_closed = (
+                db.query(func.count(UserMatrix.id))
+                .filter(
+                    UserMatrix.user_id == sponsor.id,
+                    UserMatrix.matrix_level == level,
+                    UserMatrix.status == "closed",
+                )
+                .scalar()
+                or 0
+            )
+            sponsor_level = 1 + int(sponsor_closed)
+            if sponsor_level >= my_level:
+                chosen_sponsor_id = sponsor.id
+                break
+            sponsor_id = sponsor.referrer_id
+
+        if chosen_sponsor_id:
             if find_placement_in_chain(db, chosen_sponsor_id, user_id, level, on_bonus_callback):
                 event_log(
-                    f"После реинвеста: {user.username} (id={user_id}, level={my_level}) "
+                    f"После реинвеста: {user.username} (id={user_id}, level_M{level}={my_level}) "
                     f"размещён у вышестоящего user_id={chosen_sponsor_id} по уровню M{level}"
                 )
 

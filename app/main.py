@@ -407,17 +407,30 @@ def _get_matrices_full_response(db: Session, user_id: int):
     by_level = {m.matrix_level: m for m in matrices}
     result_matrices = []
     for level in (1, 2, 3, 4):
+        # Уровень по конкретной матрице: 1 + количество закрытых матриц этого уровня
+        closed_count_level = (
+            db.query(func.count(UserMatrix.id))
+            .filter(
+                UserMatrix.user_id == user.id,
+                UserMatrix.matrix_level == level,
+                UserMatrix.status == "closed",
+            )
+            .scalar()
+            or 0
+        )
+        user_level_for_matrix = 1 + int(closed_count_level)
         m = by_level.get(level)
         if not m:
             result_matrices.append({
                 "level": level,
                 "matrix_id": None,
                 "positions": [{"position": p, "username": None} for p in range(1, 8)],
+                "user_level": user_level_for_matrix,
             })
             continue
         data = services.get_matrix_with_positions(db, m.id)
         if not data:
-            result_matrices.append({"level": level, "matrix_id": m.id, "positions": []})
+            result_matrices.append({"level": level, "matrix_id": m.id, "positions": [], "user_level": user_level_for_matrix})
             continue
         owner_id = data["matrix"].user_id
         positions_out = []
@@ -428,23 +441,14 @@ def _get_matrices_full_response(db: Session, user_id: int):
             u = db.query(User).filter(User.id == p.user_id).first()
             name = (u.username if u else None) or f"id:{p.user_id}"
             positions_out.append({"position": p.position, "username": name})
-        result_matrices.append({"level": level, "matrix_id": m.id, "positions": positions_out})
-
-    # Уровень пользователя = 1 + количество закрытых матриц (по всем уровням)
-    closed_count = (
-        db.query(func.count(UserMatrix.id))
-        .filter(UserMatrix.user_id == user.id, UserMatrix.status == "closed")
-        .scalar()
-        or 0
-    )
-    user_matrix_level = 1 + int(closed_count)
+        result_matrices.append({"level": level, "matrix_id": m.id, "positions": positions_out, "user_level": user_level_for_matrix})
 
     return {
         "user": {
             "id": user.id,
             "username": user.username,
             "balance": user.balance,
-            "matrix_level": user_matrix_level,
+            "total_earned": getattr(user, "total_earned", 0.0),
         },
         "matrices": result_matrices,
     }
