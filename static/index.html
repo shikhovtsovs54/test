@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Matrix — Личный кабинет v3</title>
+  <title>Matrix — Личный кабинет</title>
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -150,6 +150,43 @@
       letter-spacing: 0.06em;
       color: var(--text-muted);
       margin: 0 0 1rem 0;
+    }
+
+    .finance-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .finance-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+    }
+    .finance-title {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+    .finance-amount {
+      font-size: 1.6rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .finance-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 0.25rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .finance-label {
+      color: var(--text-secondary);
+    }
+    .finance-value {
+      font-weight: 600;
     }
 
     .purchase-form { margin-top: 0.5rem; }
@@ -428,11 +465,23 @@
   <div id="dashboard" style="display: none;" class="container">
     <header class="header">
       <div class="header-left">
-        <h1><span id="header-username">—</span> · v3</h1>
+        <h1 id="header-username">—</h1>
       </div>
     </header>
     <div id="invited-by-block" class="card invited-by-block" style="display: none;">
       <p class="invited-by-text">Вас пригласил: <strong id="referrer-username">—</strong></p>
+    </div>
+
+    <!-- Финансовый блок первым, в стиле банковского дашборда -->
+    <div class="card finance-card">
+      <div class="finance-header">
+        <div class="finance-title">Ваш баланс</div>
+        <div class="finance-amount">$<span id="finance-balance">0.00</span></div>
+      </div>
+      <div class="finance-row">
+        <span class="finance-label">Всего заработано</span>
+        <span class="finance-value">$<span id="finance-total-earned">0.00</span></span>
+      </div>
     </div>
 
     <div class="card">
@@ -444,7 +493,7 @@
           <label class="purchase-opt" id="purchase-opt-1"><input type="checkbox" id="buy-m1" /> <span>M1</span><span class="price">$10</span></label>
           <label class="purchase-opt" id="purchase-opt-2"><input type="checkbox" id="buy-m2" /> <span>M2</span><span class="price">$20</span></label>
           <label class="purchase-opt" id="purchase-opt-3"><input type="checkbox" id="buy-m3" /> <span>M3</span><span class="price">$40</span></label>
-          <label class="purchase-opt" id="purchase-opt-4"><input type="checkbox" id="buy-m4" /> <span>M4</span><span class="price">$80</span></label>
+          <label class="purchase-opt" id="purchase-opt-4"><input type="checkbox" id="buy-m4" /> <span>M4</span><span class.price">$80</span></label>
         </div>
         <div class="purchase-total">Итого: <span id="purchase-total">$0</span></div>
         <button type="button" class="btn-purchase" id="btn-purchase" disabled>Купить матрицы</button>
@@ -485,12 +534,6 @@
       <div class="root-actions">
         <button type="button" class="btn-danger" id="btn-reset-db">Обнулить базу (оставить только root)</button>
       </div>
-    </div>
-
-    <div class="card">
-      <h2>Финансы</h2>
-      <p>Ваш баланс: $<span id="finance-balance">0.00</span></p>
-      <p>Всего заработано: $<span id="finance-total-earned">0.00</span></p>
     </div>
 
     <div class="card">
